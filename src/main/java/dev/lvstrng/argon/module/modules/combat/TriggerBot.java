@@ -17,7 +17,6 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.fluid.Fluids;
 import net.minecraft.item.*;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -36,10 +35,6 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 			.setDescription(EncryptedString.of("Delay for swords"));
 	private final MinMaxSetting axeDelay = new MinMaxSetting(EncryptedString.of("Axe Delay"), 0, 1000, 1, 780, 800)
 			.setDescription(EncryptedString.of("Delay for axes"));
-	/*private final NumberSetting swordDelay = new NumberSetting(EncryptedString.of("Sword Delay"), 0, 1000, 550, 1)
-			.setDescription(EncryptedString.of("Delay for swords"));*/
-	/*private final NumberSetting axeDelay = new NumberSetting(EncryptedString.of("Axe Delay"), 0, 1000, 800, 1)
-			.setDescription(EncryptedString.of("Delay for axes"));*/
 	private final BooleanSetting checkShield = new BooleanSetting(EncryptedString.of("Check Shield"), false)
 			.setDescription(EncryptedString.of("Checks if the player is blocking your hits with a shield (Recommended with Shield Disabler)"));
 	private final BooleanSetting onlyCritSword = new BooleanSetting(EncryptedString.of("Only Crit Sword"), false)
@@ -64,6 +59,7 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 	private final TimerUtils timer = new TimerUtils();
 
 	private int currentSwordDelay, currentAxeDelay;
+	private Entity lockedTarget = null;
 
 	public TriggerBot() {
 		super(EncryptedString.of("Trigger Bot"),
@@ -77,6 +73,7 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 	public void onEnable() {
 		currentSwordDelay = swordDelay.getRandomValueInt();
 		currentAxeDelay = axeDelay.getRandomValueInt();
+		lockedTarget = null;
 
 		eventManager.add(TickListener.class, this);
 		eventManager.add(AttackListener.class, this);
@@ -85,6 +82,7 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 
 	@Override
 	public void onDisable() {
+		lockedTarget = null;
 		eventManager.remove(TickListener.class, this);
 		eventManager.remove(AttackListener.class, this);
 		super.onDisable();
@@ -101,7 +99,6 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 				return;
 
 			ItemStack mainHandStack = mc.player.getMainHandStack();
-			Item item = mainHandStack.getItem();
 
 			if (onLeftClick.getValue() && GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS)
 				return;
@@ -112,112 +109,119 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 			if (!whileAscend.getValue() && ((!mc.player.isOnGround() && mc.player.getVelocity().y > 0) || (!mc.player.isOnGround() && mc.player.fallDistance <= 0.0F)))
 				return;
 
+			Entity target = null;
+			Entity crosshairEntity = (mc.crosshairTarget instanceof EntityHitResult hit) ? hit.getEntity() : null;
+
+			if (sticky.getValue()) {
+				if (lockedTarget != null) {
+					if (!lockedTarget.isAlive() || lockedTarget.isSpectator() || lockedTarget.getEntityWorld() != mc.world) {
+						lockedTarget = null;
+					}
+				}
+
+				if (lockedTarget == null) {
+					if (crosshairEntity != null && isValidTarget(crosshairEntity)) {
+						lockedTarget = crosshairEntity;
+					}
+				}
+
+				// Target tabhi valid hoga jab lockedTarget set ho aur crosshair exact usi par ho
+				if (lockedTarget != null && crosshairEntity == lockedTarget) {
+					target = lockedTarget;
+				} else {
+					return;
+				}
+			} else {
+				lockedTarget = null;
+				target = crosshairEntity;
+			}
+
+			if (target == null || !isValidTarget(target))
+				return;
+
+			if (mc.player.distanceTo(target) > 4.5f) {
+				return;
+			}
+
 			if (!allItems.getValue()) {
 				if (WorldUtils.isSword(mainHandStack)) {
-					if (mc.crosshairTarget instanceof EntityHitResult hit) {
-						Entity entity = hit.getEntity();
-
-						assert mc.player.getAttacking() != null;
-						if (sticky.getValue() && entity != mc.player.getAttacking())
+					if (target instanceof PlayerEntity player) {
+						if (checkShield.getValue() && player.isBlocking() && !WorldUtils.isShieldFacingAway(player))
 							return;
+					}
 
-						if (entity instanceof PlayerEntity || (strayBypass.getValue() && entity instanceof ZombieEntity) || (allEntities.getValue() && entity != null)) {
+					if (onlyCritSword.getValue() && mc.player.fallDistance <= 0.0F)
+						return;
 
-							if (entity instanceof PlayerEntity player) {
-								if (checkShield.getValue() && player.isBlocking() && !WorldUtils.isShieldFacingAway(player))
-									return;
-							}
+					if (timer.delay(currentSwordDelay)) {
+						if (useShield.getValue()) {
+							if (mc.player.getOffHandStack().getItem() == Items.SHIELD && mc.player.isBlocking())
+								MouseSimulation.mouseRelease(GLFW.GLFW_MOUSE_BUTTON_RIGHT);
+						}
 
-							if (onlyCritSword.getValue() && mc.player.fallDistance <= 0.0F)
-								return;
+						WorldUtils.hitEntity(target, swing.getValue());
 
-							if (timer.delay(currentSwordDelay)) {
-								if (useShield.getValue()) {
-									if (mc.player.getOffHandStack().getItem() == Items.SHIELD && mc.player.isBlocking())
-										MouseSimulation.mouseRelease(GLFW.GLFW_MOUSE_BUTTON_RIGHT);
-								}
+						if (clickSimulation.getValue())
+							MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
 
-								WorldUtils.hitEntity(entity, swing.getValue());
-
-								if (clickSimulation.getValue())
-									MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-
-								currentSwordDelay = swordDelay.getRandomValueInt();
-								timer.reset();
-							} else {
-								if (useShield.getValue()) {
-									if (mc.player.getOffHandStack().getItem() == Items.SHIELD) {
-										int useFor = shieldTime.getValueInt();
-										MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_RIGHT, useFor);
-									}
-								}
+						currentSwordDelay = swordDelay.getRandomValueInt();
+						timer.reset();
+					} else {
+						if (useShield.getValue()) {
+							if (mc.player.getOffHandStack().getItem() == Items.SHIELD) {
+								int useFor = shieldTime.getValueInt();
+								MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_RIGHT, useFor);
 							}
 						}
 					}
 				} else if (WorldUtils.isAxe(mainHandStack)) {
-					if (mc.crosshairTarget instanceof EntityHitResult hit) {
-						Entity entity = hit.getEntity();
+					if (target instanceof PlayerEntity player) {
+						if (checkShield.getValue() && player.isBlocking() && !WorldUtils.isShieldFacingAway(player))
+							return;
+					}
 
-						if (entity instanceof PlayerEntity || (strayBypass.getValue() && entity instanceof ZombieEntity) || (allEntities.getValue() && entity != null)) {
-							if (entity instanceof PlayerEntity player) {
-								if (checkShield.getValue() && player.isBlocking() && !WorldUtils.isShieldFacingAway(player))
-									return;
-							}
+					if (onlyCritAxe.getValue() && mc.player.fallDistance <= 0.0F)
+						return;
 
-							if (onlyCritAxe.getValue() && mc.player.fallDistance <= 0.0F)
-								return;
+					if (timer.delay(currentAxeDelay)) {
+						WorldUtils.hitEntity(target, swing.getValue());
 
-							if (timer.delay(currentAxeDelay)) {
-								WorldUtils.hitEntity(entity, swing.getValue());
+						if (clickSimulation.getValue())
+							MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
 
-								if (clickSimulation.getValue())
-									MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-
-								currentAxeDelay = axeDelay.getRandomValueInt();
-								timer.reset();
-							} else {
-								if (useShield.getValue()) {
-									if (mc.player.getOffHandStack().getItem() == Items.SHIELD) {
-										int useFor = shieldTime.getValueInt();
-										MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_RIGHT, useFor);
-									}
-								}
+						currentAxeDelay = axeDelay.getRandomValueInt();
+						timer.reset();
+					} else {
+						if (useShield.getValue()) {
+							if (mc.player.getOffHandStack().getItem() == Items.SHIELD) {
+								int useFor = shieldTime.getValueInt();
+								MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_RIGHT, useFor);
 							}
 						}
 					}
 				}
 			} else {
-				if (mc.crosshairTarget instanceof EntityHitResult entityHit && mc.crosshairTarget.getType() == HitResult.Type.ENTITY) {
-					Entity entity = entityHit.getEntity();
-
-					assert mc.player.getAttacking() != null;
-					if (sticky.getValue() && entity != mc.player.getAttacking())
+				if (target instanceof PlayerEntity player) {
+					if (checkShield.getValue() && player.isBlocking() && !WorldUtils.isShieldFacingAway(player))
 						return;
+				}
 
-					if (entity instanceof PlayerEntity || (strayBypass.getValue() && entity instanceof ZombieEntity) || (allEntities.getValue() && entity != null)) {
-						if (entity instanceof PlayerEntity player) {
-							if (checkShield.getValue() && player.isBlocking() && !WorldUtils.isShieldFacingAway(player))
-								return;
-						}
+				if (onlyCritSword.getValue() && mc.player.fallDistance <= 0.0F)
+					return;
 
-						if (onlyCritSword.getValue() && mc.player.fallDistance <= 0.0F)
-							return;
+				if (timer.delay(currentSwordDelay)) {
+					WorldUtils.hitEntity(target, swing.getValue());
 
-						if (timer.delay(currentSwordDelay)) {
-							WorldUtils.hitEntity(entity, swing.getValue());
+					if (clickSimulation.getValue())
+						MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
 
-							if (clickSimulation.getValue())
-								MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-
-							currentSwordDelay = swordDelay.getRandomValueInt();
-							timer.reset();
-						} else {
-							if (useShield.getValue()) {
-								if (mc.player.getOffHandStack().getItem() == Items.SHIELD) {
-									int useFor = shieldTime.getValueInt();
-									MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_RIGHT, useFor);
-								}
-							}
+					currentSwordDelay = swordDelay.getRandomValueInt();
+					timer.reset();
+				} else {
+					if (useShield.getValue()) {
+						if (mc.player.getOffHandStack().getItem() == Items.SHIELD) {
+							int useFor = shieldTime.getValueInt();
+							MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_RIGHT, useFor);
 						}
 					}
 				}
@@ -225,9 +229,20 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 		} catch (Exception ignored) {}
 	}
 
+	private boolean isValidTestEntity(Entity entity) {
+		if (entity == null || entity == mc.player || entity == mc.getCameraEntity()) return false;
+		if (!entity.isAlive() || entity.isRemoved()) return false;
+		return true;
+	}
+
+	private boolean isValidTarget(Entity entity) {
+		if (!isValidTestEntity(entity)) return false;
+		return entity instanceof PlayerEntity || (strayBypass.getValue() && entity instanceof ZombieEntity) || (allEntities.getValue());
+	}
+
 	@Override
 	public void onAttack(AttackEvent event) {
 		if (GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS)
 			event.cancel();
 	}
-}
+							}
