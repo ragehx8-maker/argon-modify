@@ -41,16 +41,12 @@ public final class KeybindBox extends RenderableSetting {
 	@Override
 	public void keyPressed(int keyCode, int scanCode, int modifiers) {
 		if (keybind.isListening()) {
-			// Agar Backspace ya Delete dabaya, toh keybind unbind (-1) ho jayega
-			if (keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE) {
+			// Agar Backspace, Delete ya Escape dabaya, toh keybind unbind (-1) ho jayega
+			if (keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE || keyCode == GLFW.GLFW_KEY_ESCAPE) {
 				if (keybind.isModuleKey()) {
 					parent.module.setKey(-1);
 				}
 				keybind.setKey(-1);
-				keybind.setListening(false);
-			} 
-			// Agar Escape dabaya, toh sirf listening band ho jayegi
-			else if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
 				keybind.setListening(false);
 			} 
 			// Koi aur key dabane par wahi keybind set ho jayegi
