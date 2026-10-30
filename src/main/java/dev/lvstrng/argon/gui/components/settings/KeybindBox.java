@@ -11,7 +11,6 @@ import org.lwjgl.glfw.GLFW;
 
 import java.awt.*;
 
-
 public final class KeybindBox extends RenderableSetting {
 	public KeybindSetting keybind;
 	private Color currentAlpha;
@@ -41,28 +40,28 @@ public final class KeybindBox extends RenderableSetting {
 
 	@Override
 	public void keyPressed(int keyCode, int scanCode, int modifiers) {
-		if(keyCode == GLFW.GLFW_KEY_BACKSPACE) {
-			if(mouseOver) {
-				if (keybind.isModuleKey())
-					parent.module.setKey(keybind.getOriginalKey());
-
-				keybind.setKey(keybind.getOriginalKey());
+		if (keybind.isListening()) {
+			// Agar Backspace ya Delete dabaya, toh keybind unbind (-1) ho jayega
+			if (keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE) {
+				if (keybind.isModuleKey()) {
+					parent.module.setKey(-1);
+				}
+				keybind.setKey(-1);
 				keybind.setListening(false);
-			}
-		} else {
-			if (keybind.isListening() && keyCode != GLFW.GLFW_KEY_ESCAPE) {
-				if (keybind.isModuleKey()) parent.module.setKey(keyCode);
-
+			} 
+			// Agar Escape dabaya, toh sirf listening band ho jayegi
+			else if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+				keybind.setListening(false);
+			} 
+			// Koi aur key dabane par wahi keybind set ho jayegi
+			else {
+				if (keybind.isModuleKey()) {
+					parent.module.setKey(keyCode);
+				}
 				keybind.setKey(keyCode);
 				keybind.setListening(false);
 			}
-
-			if (keybind.getKey() == GLFW.GLFW_KEY_ESCAPE) {
-				if (keybind.isModuleKey()) parent.module.setKey(parent.module.getKey());
-
-				keybind.setKey(keybind.getKey());
-				keybind.setListening(false);
-			}
+			return;
 		}
 		super.keyPressed(keyCode, scanCode, modifiers);
 	}
