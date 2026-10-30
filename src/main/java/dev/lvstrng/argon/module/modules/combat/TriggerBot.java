@@ -20,7 +20,6 @@ import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.*;
 import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.hit.HitResult;
 import org.lwjgl.glfw.GLFW;
 
 public final class TriggerBot extends Module implements TickListener, AttackListener {
@@ -107,10 +106,10 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 			if (((mc.player.getOffHandStack().getItem().getComponents().contains(DataComponentTypes.FOOD) || mc.player.getOffHandStack().getItem() instanceof ShieldItem) && GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS) && !whileUse.getValue())
 				return;
 			
-			// Pani ya Cobweb check taaki fluid/web ke andar hit na ruke
+			// Pani ya Cobweb check (mc.world use kiya hai ab)
 			boolean inWaterOrWeb = mc.player.isTouchingWater() || 
-					mc.player.getWorld().getBlockState(mc.player.getBlockPos()).isOf(Blocks.COBWEB) || 
-					mc.player.getWorld().getBlockState(mc.player.getBlockPos().up()).isOf(Blocks.COBWEB);
+					mc.world.getBlockState(mc.player.getBlockPos()).isOf(Blocks.COBWEB) || 
+					mc.world.getBlockState(mc.player.getBlockPos().up()).isOf(Blocks.COBWEB);
 
 			if (!whileAscend.getValue() && !inWaterOrWeb && ((!mc.player.isOnGround() && mc.player.getVelocity().y > 0) || (!mc.player.isOnGround() && mc.player.fallDistance <= 0.0F)))
 				return;
@@ -250,4 +249,4 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 		if (GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS)
 			event.cancel();
 	}
-						}
+}
