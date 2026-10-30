@@ -250,4 +250,4 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 		if (GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS)
 			event.cancel();
 	}
-							}
+						}
