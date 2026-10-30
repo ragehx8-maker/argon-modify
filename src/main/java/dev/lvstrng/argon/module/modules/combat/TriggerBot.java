@@ -13,6 +13,7 @@ import dev.lvstrng.argon.utils.EncryptedString;
 import dev.lvstrng.argon.utils.MouseSimulation;
 import dev.lvstrng.argon.utils.TimerUtils;
 import dev.lvstrng.argon.utils.WorldUtils;
+import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.ZombieEntity;
@@ -106,7 +107,12 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 			if (((mc.player.getOffHandStack().getItem().getComponents().contains(DataComponentTypes.FOOD) || mc.player.getOffHandStack().getItem() instanceof ShieldItem) && GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS) && !whileUse.getValue())
 				return;
 			
-			if (!whileAscend.getValue() && ((!mc.player.isOnGround() && mc.player.getVelocity().y > 0) || (!mc.player.isOnGround() && mc.player.fallDistance <= 0.0F)))
+			// Pani ya Cobweb check taaki fluid/web ke andar hit na ruke
+			boolean inWaterOrWeb = mc.player.isTouchingWater() || 
+					mc.player.getWorld().getBlockState(mc.player.getBlockPos()).isOf(Blocks.COBWEB) || 
+					mc.player.getWorld().getBlockState(mc.player.getBlockPos().up()).isOf(Blocks.COBWEB);
+
+			if (!whileAscend.getValue() && !inWaterOrWeb && ((!mc.player.isOnGround() && mc.player.getVelocity().y > 0) || (!mc.player.isOnGround() && mc.player.fallDistance <= 0.0F)))
 				return;
 
 			Entity target = null;
@@ -125,7 +131,6 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 					}
 				}
 
-				// Target tabhi valid hoga jab lockedTarget set ho aur crosshair exact usi par ho
 				if (lockedTarget != null && crosshairEntity == lockedTarget) {
 					target = lockedTarget;
 				} else {
@@ -150,7 +155,7 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 							return;
 					}
 
-					if (onlyCritSword.getValue() && mc.player.fallDistance <= 0.0F)
+					if (onlyCritSword.getValue() && !inWaterOrWeb && mc.player.fallDistance <= 0.0F)
 						return;
 
 					if (timer.delay(currentSwordDelay)) {
@@ -180,7 +185,7 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 							return;
 					}
 
-					if (onlyCritAxe.getValue() && mc.player.fallDistance <= 0.0F)
+					if (onlyCritAxe.getValue() && !inWaterOrWeb && mc.player.fallDistance <= 0.0F)
 						return;
 
 					if (timer.delay(currentAxeDelay)) {
@@ -206,7 +211,7 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 						return;
 				}
 
-				if (onlyCritSword.getValue() && mc.player.fallDistance <= 0.0F)
+				if (onlyCritSword.getValue() && !inWaterOrWeb && mc.player.fallDistance <= 0.0F)
 					return;
 
 				if (timer.delay(currentSwordDelay)) {
@@ -245,4 +250,4 @@ public final class TriggerBot extends Module implements TickListener, AttackList
 		if (GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS)
 			event.cancel();
 	}
-					}
+							}
