@@ -63,6 +63,7 @@ public final class AimAssist extends Module implements HudListener, MouseMoveLis
 	private final TimerUtils resetSpeed = new TimerUtils();
 	private boolean move;
 	private float pitch, yaw;
+	private PlayerEntity lockedTarget = null;
 
 	@SuppressWarnings("unused")
 	public enum PosMode {
@@ -91,6 +92,7 @@ public final class AimAssist extends Module implements HudListener, MouseMoveLis
 		move = true;
 		pitch = pitchSpeed.getRandomValueFloat();
 		yaw = yawSpeed.getRandomValueFloat();
+		lockedTarget = null;
 
 		eventManager.add(HudListener.class, this);
 		eventManager.add(MouseMoveListener.class, this);
@@ -101,6 +103,7 @@ public final class AimAssist extends Module implements HudListener, MouseMoveLis
 
 	@Override
 	public void onDisable() {
+		lockedTarget = null;
 		eventManager.remove(HudListener.class, this);
 		eventManager.remove(MouseMoveListener.class, this);
 		super.onDisable();
@@ -122,12 +125,39 @@ public final class AimAssist extends Module implements HudListener, MouseMoveLis
 		if (onLeftClick.getValue() && GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS)
 			return;
 
-		PlayerEntity target = WorldUtils.findNearestPlayer(mc.player, radius.getValueFloat(), seeOnly.getValue(), true);
-		if (stickyAim.getValue() && mc.player.getAttacking() instanceof PlayerEntity player && player.distanceTo(mc.player) < radius.getValue())
-			target = player;
+		PlayerEntity target = null;
+
+		if (stickyAim.getValue()) {
+			if (lockedTarget != null) {
+				if (!lockedTarget.isAlive() || lockedTarget.isSpectator() || lockedTarget.getEntityWorld() != mc.world) {
+					lockedTarget = null;
+				}
+			}
+
+			if (lockedTarget == null) {
+				if (mc.player.getAttacking() instanceof PlayerEntity player && player.distanceTo(mc.player) < radius.getValue()) {
+					lockedTarget = player;
+				} else {
+					lockedTarget = WorldUtils.findNearestPlayer(mc.player, radius.getValueFloat(), seeOnly.getValue(), true);
+				}
+			}
+
+			target = lockedTarget;
+		} else {
+			lockedTarget = null;
+			target = WorldUtils.findNearestPlayer(mc.player, radius.getValueFloat(), seeOnly.getValue(), true);
+			if (mc.player.getAttacking() instanceof PlayerEntity player && player.distanceTo(mc.player) < radius.getValue())
+				target = player;
+		}
 
 		if (target == null)
 			return;
+
+		// Yahan check lagaya hai: Target locked rahega, lekin agar wo radius se door chala gaya, 
+		// toh aim assist camera ko nahi kheenchega (camera free rahega jab tak wo paas na aaye).
+		if (stickyAim.getValue() && lockedTarget != null && target.distanceTo(mc.player) > radius.getValue()) {
+			return;
+		}
 
 		if(resetSpeed.delay(speedChange.getValueFloat())) {
 			pitch = pitchSpeed.getRandomValueFloat();
@@ -194,7 +224,7 @@ public final class AimAssist extends Module implements HudListener, MouseMoveLis
 		}
 	}
 
-	public float lerp(float delta, float start, float end) {
+    public float lerp(float delta, float start, float end) {
 		return start + (MathHelper.wrapDegrees(end - start) * delta);
 	}
 
@@ -221,4 +251,4 @@ public final class AimAssist extends Module implements HudListener, MouseMoveLis
 		move = false;
 		timer.reset();
 	}
-}
+				}
