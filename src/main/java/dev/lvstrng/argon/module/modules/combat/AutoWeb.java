@@ -48,8 +48,9 @@ public final class AutoWeb extends Module {
             return;
 
         if (onKeyMode.getValue()) {
-            if (activationKey.getKeyCode() != -1) {
-                boolean isPressed = GLFW.glfwGetKey(mc.getWindow().getHandle(), activationKey.getKeyCode()) == GLFW.GLFW_PRESS;
+            int key = activationKey.getValue(); // Corrected key fetching method
+            if (key != -1) {
+                boolean isPressed = GLFW.glfwGetKey(mc.getWindow().getHandle(), key) == GLFW.GLFW_PRESS;
                 
                 if (isPressed && !wasPressed) {
                     if (mc.targetedEntity instanceof PlayerEntity player) {
