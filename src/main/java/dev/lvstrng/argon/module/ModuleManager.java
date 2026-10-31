@@ -43,13 +43,13 @@ public final class ModuleManager implements ButtonListener {
 		add(new ShieldDisabler());
 		add(new TotemOffhand());
 		add(new AutoJumpReset());
-modules.add(new HitCob());
+        add(new AutoWeb());
 		//Misc
 		add(new Prevent());
 		add(new AutoXP());
 		add(new NoJumpDelay());
 		add(new PingSpoof());
-		add(new FakeLag());
+		
 		add(new AutoClicker());
 		add(new KeyPearl());
 		add(new NoBreakDelay());
