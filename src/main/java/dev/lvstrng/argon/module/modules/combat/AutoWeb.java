@@ -4,7 +4,6 @@ import dev.lvstrng.argon.event.events.AttackListener;
 import dev.lvstrng.argon.module.Category;
 import dev.lvstrng.argon.module.Module;
 import dev.lvstrng.argon.module.setting.BooleanSetting;
-import dev.lvstrng.argon.module.setting.ChoiceSetting;
 import dev.lvstrng.argon.module.setting.KeybindSetting;
 import dev.lvstrng.argon.module.setting.NumberSetting;
 import dev.lvstrng.argon.utils.EncryptedString;
@@ -23,8 +22,8 @@ import net.minecraft.util.math.Vec3d;
 import java.util.concurrent.ThreadLocalRandom;
 
 public final class AutoWeb extends Module implements AttackListener {
-    // Mochi style settings
-    private final ChoiceSetting mode = new ChoiceSetting(EncryptedString.of("Mode"), "Auto", new String[]{"Auto", "On Key"});
+    // Argon compatible settings (Using BooleanSetting instead of ChoiceSetting)
+    private final BooleanSetting onKeyMode = new BooleanSetting(EncryptedString.of("On Key Mode"), false);
     private final KeybindSetting activationKey = new KeybindSetting(EncryptedString.of("Activation Key"), -1, false);
     private final NumberSetting chance = new NumberSetting(EncryptedString.of("Chance"), 10, 100, 100, 1);
     private final NumberSetting predictionTime = new NumberSetting(EncryptedString.of("Prediction Time"), 0.1, 2.0, 0.5, 0.1);
@@ -36,11 +35,11 @@ public final class AutoWeb extends Module implements AttackListener {
 
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
-                EncryptedString.of("Mochi style advanced auto web with prediction and smooth rotation bypass"),
+                EncryptedString.of("Advanced auto web with prediction and smooth rotation bypass"),
                 -1,
                 Category.COMBAT);
 
-        addSettings(mode, activationKey, chance, predictionTime, aimSpeed, silentRotation, swapBack);
+        addSettings(onKeyMode, activationKey, chance, predictionTime, aimSpeed, silentRotation, swapBack);
     }
 
     @Override
@@ -60,7 +59,8 @@ public final class AutoWeb extends Module implements AttackListener {
         if (mc.world == null || mc.player == null)
             return;
 
-        if (mode.getSelected().equals("Auto")) {
+        // Auto Mode: Triggers on attack if On Key Mode is disabled
+        if (!onKeyMode.isOn()) {
             if (event.entity instanceof PlayerEntity player) {
                 tryPlaceWeb(player);
             }
@@ -72,9 +72,9 @@ public final class AutoWeb extends Module implements AttackListener {
         if (mc.player == null || mc.world == null)
             return;
 
-        // "On Key" Mode Logic (Mochi style activation key check)
-        if (mode.getSelected().equals("On Key")) {
-            if (activationKey.getKeyCode() != -1 && org.lwjgl.glfw.GLFW.glfwGetKey(mc.getWindow().getHandle(), activationKey.getKeyCode()) == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
+        // "On Key" Mode Logic
+        if (onKeyMode.isOn()) {
+            if (activationKey.getKeyCode() != -1 && org.lwjgl.glfw.glfwGetKey(mc.getWindow().getHandle(), activationKey.getKeyCode()) == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
                 if (mc.targetedEntity instanceof PlayerEntity player) {
                     tryPlaceWeb(player);
                 }
@@ -99,7 +99,6 @@ public final class AutoWeb extends Module implements AttackListener {
         if (cobwebSlot == -1)
             return;
 
-        // Mochi style velocity & prediction calculation
         Vec3d velocity = player.getVelocity();
         double predTime = predictionTime.getValue();
         Vec3d predictedPos = player.getPos().add(velocity.x * predTime, velocity.y * predTime, velocity.z * predTime);
@@ -124,7 +123,6 @@ public final class AutoWeb extends Module implements AttackListener {
         float originalYaw = mc.player.getYaw();
         float originalPitch = mc.player.getPitch();
 
-        // Mochi style Smooth Rotation Clamping (Anti-Cheat Bypass)[cite: 7]
         float yawDiff = MathHelper.wrapDegrees(targetRots[0] - originalYaw);
         float pitchDiff = targetRots[1] - originalPitch;
         
@@ -132,24 +130,20 @@ public final class AutoWeb extends Module implements AttackListener {
         float smoothedYaw = originalYaw + MathHelper.clamp(yawDiff, (float)-maxDelta, (float)maxDelta);
         float smoothedPitch = MathHelper.clamp(originalPitch + MathHelper.clamp(pitchDiff, (float)-maxDelta, (float)maxDelta), -89.0F, 89.0F);
 
-        // Silent Rotation Packet[cite: 7]
         if (silentRotation.isOn()) {
             mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(smoothedYaw, smoothedPitch, mc.player.isOnGround(), false));
         }
 
-        // Place block
         mc.player.getInventory().setSelectedSlot(cobwebSlot);
         BlockHitResult blockHitResult = new BlockHitResult(vec3d4, Direction.UP, placePos, false);
         if (mc.interactionManager != null) {
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, blockHitResult);
         }
 
-        // SwapBack[cite: 7]
         if (swapBack.isOn()) {
             mc.player.getInventory().setSelectedSlot(oldSlot);
         }
 
-        // Restore rotation
         if (silentRotation.isOn()) {
             mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
         }
