@@ -1,4 +1,3 @@
-
 package dev.lvstrng.argon.module.modules.combat;
 
 import dev.lvstrng.argon.event.events.AttackListener;
@@ -49,7 +48,7 @@ public final class HitCob extends Module implements AttackListener {
 		if (mc.world == null || mc.player == null)
 			return;
 
-		if (event.getTarget() instanceof PlayerEntity player) {
+		if (event.target instanceof PlayerEntity player) {
 			if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt())
 				return;
 
@@ -61,15 +60,18 @@ public final class HitCob extends Module implements AttackListener {
 			if (mc.world.getBlockState(blockPos).getBlock() == Blocks.COBWEB || mc.world.getBlockState(blockPos).getBlock() == Blocks.WATER)
 				return;
 
-			double distance = mc.player.getPos().distanceTo(Vec3d.ofCenter(blockPos));
+			Vec3d playerPos = new Vec3d(player.getX(), player.getY(), player.getZ());
+			Vec3d myPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+
+			double distance = myPos.distanceTo(Vec3d.ofCenter(blockPos));
 			if (distance > 4.5)
 				return;
 
 			double velocity = Math.hypot(player.getVelocity().x, player.getVelocity().z);
-			Vec3d direction = player.getPos().subtract(mc.player.getPos()).normalize();
+			Vec3d direction = playerPos.subtract(myPos).normalize();
 			double offset = velocity < 0.05 ? 1.2 : (player.isSprinting() ? 1.5 : 1.0);
 
-			Vec3d targetVec = player.getPos().add(direction.multiply(offset));
+			Vec3d targetVec = playerPos.add(direction.multiply(offset));
 			BlockPos targetBlock = BlockPos.ofFloored(targetVec);
 
 			if (mc.world.getBlockState(targetBlock).getBlock() == Blocks.COBWEB || !mc.world.getBlockState(targetBlock).isAir()) {
@@ -80,7 +82,7 @@ public final class HitCob extends Module implements AttackListener {
 			if (mc.world.getBlockState(placePos).isAir())
 				return;
 
-			double placeDist = mc.player.getPos().distanceTo(Vec3d.ofCenter(placePos));
+			double placeDist = myPos.distanceTo(Vec3d.ofCenter(placePos));
 			if (placeDist > 4.5)
 				return;
 
@@ -92,7 +94,8 @@ public final class HitCob extends Module implements AttackListener {
 			float originalYaw = mc.player.getYaw();
 			float originalPitch = mc.player.getPitch();
 
-			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround()));
+			// Using PlayerMoveC2SPacket.Full to prevent constructor mismatch
+			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.Full(myPos.x, myPos.y, myPos.z, rots[0], rots[1], mc.player.isOnGround()));
 
 			mc.player.getInventory().setSelectedSlot(cobwebSlot);
 			BlockHitResult blockHitResult = new BlockHitResult(vec3d4, Direction.UP, placePos, false);
@@ -101,7 +104,7 @@ public final class HitCob extends Module implements AttackListener {
 			}
 			mc.player.getInventory().setSelectedSlot(oldSlot);
 
-			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround()));
+			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.Full(myPos.x, myPos.y, myPos.z, originalYaw, originalPitch, mc.player.isOnGround()));
 		}
 	}
 
