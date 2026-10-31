@@ -6,6 +6,7 @@ import dev.lvstrng.argon.module.Module;
 import dev.lvstrng.argon.module.setting.NumberSetting;
 import dev.lvstrng.argon.utils.EncryptedString;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -21,6 +22,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class HitCob extends Module implements AttackListener {
 	private final NumberSetting chance = new NumberSetting(EncryptedString.of("Chance"), 2, 100, 50, 1);
+	private long lastPlaceTime = 0;
 
 	public HitCob() {
 		super(EncryptedString.of("Hit Cob"),
@@ -45,10 +47,33 @@ public final class HitCob extends Module implements AttackListener {
 
 	@Override
 	public void onAttack(AttackEvent event) {
+		tryPlaceCobweb(event.entity);
+	}
+
+	// Tick method taaki TriggerBot ya normal targeting ke waqt bhi seamlessly kaam kare
+	@Override
+	public void onTick() {
+		if (mc.player == null || mc.world == null)
+			return;
+
+		if (mc.targetedEntity instanceof PlayerEntity player && mc.player.isUsingItem() == false) {
+			// Agar player left click kar raha hai ya targeted hai aur attack range mein hai
+			if (mc.options.attackKey.isPressed()) {
+				tryPlaceCobweb(player);
+			}
+		}
+		super.onTick();
+	}
+
+	private void tryPlaceCobweb(Entity targetEntity) {
 		if (mc.world == null || mc.player == null)
 			return;
 
-		if (mc.targetedEntity instanceof PlayerEntity player) {
+		// Cooldown check taaki spam hone par kick na ho (500ms delay)
+		if (System.currentTimeMillis() - lastPlaceTime < 500)
+			return;
+
+		if (targetEntity instanceof PlayerEntity player) {
 			if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt())
 				return;
 
@@ -67,19 +92,8 @@ public final class HitCob extends Module implements AttackListener {
 			if (distance > 4.5)
 				return;
 
-			double velocity = Math.hypot(player.getVelocity().x, player.getVelocity().z);
-			Vec3d direction = playerPos.subtract(myPos).normalize();
-			double offset = velocity < 0.05 ? 1.2 : (player.isSprinting() ? 1.5 : 1.0);
-
-			Vec3d targetVec = playerPos.add(direction.multiply(offset));
-			BlockPos targetBlock = BlockPos.ofFloored(targetVec);
-
-			if (mc.world.getBlockState(targetBlock).getBlock() == Blocks.COBWEB || !mc.world.getBlockState(targetBlock).isAir()) {
-				targetBlock = blockPos;
-			}
-
-			BlockPos placePos = targetBlock.down();
-			if (mc.world.getBlockState(placePos).isAir())
+			BlockPos placePos = blockPos.down();
+			if (!mc.world.getBlockState(placePos).isSolid())
 				return;
 
 			double placeDist = myPos.distanceTo(Vec3d.ofCenter(placePos));
@@ -94,7 +108,7 @@ public final class HitCob extends Module implements AttackListener {
 			float originalYaw = mc.player.getYaw();
 			float originalPitch = mc.player.getPitch();
 
-			// True Silent Rotation packet
+			// Silent rotation packet bhejo
 			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), false));
 
 			mc.player.getInventory().setSelectedSlot(cobwebSlot);
@@ -104,7 +118,10 @@ public final class HitCob extends Module implements AttackListener {
 			}
 			mc.player.getInventory().setSelectedSlot(oldSlot);
 
+			// Original rotation wapas set karo
 			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
+
+			lastPlaceTime = System.currentTimeMillis();
 		}
 	}
 
