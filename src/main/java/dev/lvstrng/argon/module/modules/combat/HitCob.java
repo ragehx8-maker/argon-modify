@@ -8,7 +8,6 @@ import dev.lvstrng.argon.utils.EncryptedString;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -30,25 +29,22 @@ public final class HitCob extends Module implements AttackListener {
     private final NumberSetting delay   = new NumberSetting(EncryptedString.of("Delay"),   200, 800, 350, 10);
     private final NumberSetting predict = new NumberSetting(EncryptedString.of("Predict"), 0,   4,   2,   1);
 
-    // State
-    private boolean pending       = false;
-    private int     stage         = 0;
-    private int     tickDelay     = 0;
-    private int     cobSlot       = -1;
-    private int     oldSlot       = -1;
+    private boolean pending        = false;
+    private int     stage          = 0;
+    private int     tickDelay      = 0;
+    private int     cobSlot        = -1;
+    private int     oldSlot        = -1;
     private BlockHitResult pendingHit = null;
-    private float   targetYaw     = 0f;
-    private float   targetPitch   = 0f;
-    private float   savedYaw      = 0f;
-    private float   savedPitch    = 0f;
-    private float   midYaw        = 0f;
-    private float   midPitch      = 0f;
-    private long    lastPlaceTime = 0L;
+    private float   targetYaw      = 0f;
+    private float   targetPitch    = 0f;
+    private float   savedYaw       = 0f;
+    private float   savedPitch     = 0f;
+    private float   midYaw         = 0f;
+    private float   midPitch       = 0f;
+    private float   jitterYaw      = 0f;
+    private float   jitterPitch    = 0f;
+    private long    lastPlaceTime  = 0L;
     private boolean tickRegistered = false;
-
-    // Per-attempt randomised jitter so every placement looks unique
-    private float jitterYaw   = 0f;
-    private float jitterPitch = 0f;
 
     public HitCob() {
         super(EncryptedString.of("Hit Cob"),
@@ -56,10 +52,6 @@ public final class HitCob extends Module implements AttackListener {
               -1, Category.COMBAT);
         addSettings(chance, reach, delay, predict);
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // Lifecycle
-    // ──────────────────────────────────────────────────────────────────────────
 
     @Override
     public void onEnable() {
@@ -80,18 +72,13 @@ public final class HitCob extends Module implements AttackListener {
         super.onDisable();
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Attack trigger
-    // ──────────────────────────────────────────────────────────────────────────
-
     @Override
-    public void onAttack(dev.lvstrng.argon.event.events.AttackEvent event) {
+    public void onAttack(AttackListener.AttackEvent event) {
         if (!isEnabled()) return;
         if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
         if (pending) return;
 
-        // Randomised delay with ±15 % noise so timing never looks mechanical
-        long baseDelay = delay.getValue().longValue();
+        long baseDelay  = delay.getValue().longValue();
         long noiseRange = (long) (baseDelay * 0.15);
         long effectiveDelay = baseDelay
                 + ThreadLocalRandom.current().nextLong(-noiseRange, noiseRange + 1);
@@ -115,9 +102,8 @@ public final class HitCob extends Module implements AttackListener {
         BlockPos placeOn = feet.down();
         if (mc.world.getBlockState(placeOn).isAir()) return;
 
-        // Slight random offset within the top face of placeOn — looks human
         ThreadLocalRandom rng = ThreadLocalRandom.current();
-        double offX = (rng.nextDouble() * 0.6) - 0.3;   // ±0.3
+        double offX = (rng.nextDouble() * 0.6) - 0.3;
         double offZ = (rng.nextDouble() * 0.6) - 0.3;
         Vec3d hitVec = new Vec3d(
                 placeOn.getX() + 0.5 + offX,
@@ -126,7 +112,6 @@ public final class HitCob extends Module implements AttackListener {
 
         if (mc.player.getEyePos().distanceTo(hitVec) > reach.getValue().doubleValue()) return;
 
-        // Commit
         pendingHit  = new BlockHitResult(hitVec, Direction.UP, placeOn, false);
         cobSlot     = slot;
         oldSlot     = mc.player.getInventory().getSelectedSlot();
@@ -137,11 +122,9 @@ public final class HitCob extends Module implements AttackListener {
         targetYaw   = rots[0];
         targetPitch = rots[1];
 
-        // Small per-attempt jitter on final rotation (±1.5°) — defeats pattern detection
         jitterYaw   = (rng.nextFloat() * 3f) - 1.5f;
         jitterPitch = (rng.nextFloat() * 2f) - 1.0f;
 
-        // Mid-rotation halfway between saved and target
         midYaw   = savedYaw   + lerpAngle(savedYaw,   targetYaw,   0.5f);
         midPitch = savedPitch + (targetPitch - savedPitch) * 0.5f;
 
@@ -151,13 +134,8 @@ public final class HitCob extends Module implements AttackListener {
 
         pending   = true;
         stage     = 1;
-        // Slightly randomised initial wait
         tickDelay = (horizSpeed < 0.1 ? 1 : 2) + rng.nextInt(2);
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // Prediction
-    // ──────────────────────────────────────────────────────────────────────────
 
     private BlockPos resolveTargetBlock(PlayerEntity player) {
         int steps = predict.getValue().intValue();
@@ -186,10 +164,6 @@ public final class HitCob extends Module implements AttackListener {
         return last;
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // State machine  (5 stages for smoother, more human-like rotation curve)
-    // ──────────────────────────────────────────────────────────────────────────
-
     private void onTick() {
         if (!pending) return;
         if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) {
@@ -200,44 +174,29 @@ public final class HitCob extends Module implements AttackListener {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
 
         switch (stage) {
-
-            // Stage 1 — rotate ~30 % toward target (first micro-step)
             case 1 -> {
                 float y1 = savedYaw   + lerpAngle(savedYaw,   targetYaw,   0.30f);
                 float p1 = savedPitch + (targetPitch - savedPitch) * 0.30f;
                 applyRotation(y1, p1);
-                stage     = 2;
-                tickDelay = 1;
+                stage = 2; tickDelay = 1;
             }
-
-            // Stage 2 — rotate to mid-point
             case 2 -> {
                 applyRotation(midYaw, midPitch);
-                stage     = 3;
-                tickDelay = 1;
+                stage = 3; tickDelay = 1;
             }
-
-            // Stage 3 — snap to final rotation + slot switch
             case 3 -> {
                 applyRotation(
                         MathHelper.wrapDegrees(targetYaw   + jitterYaw),
                         MathHelper.clamp(targetPitch + jitterPitch, -89f, 89f));
                 sendSlot(cobSlot);
-                stage     = 4;
-                tickDelay = 1;
+                stage = 4; tickDelay = 1;
             }
-
-            // Stage 4 — place cobweb + swing
             case 4 -> {
                 mc.getNetworkHandler().sendPacket(
                         new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, pendingHit, 0));
-                // Swing hand ~70 % of the time — constant swing looks botted
                 if (rng.nextInt(100) < 70) mc.player.swingHand(Hand.MAIN_HAND);
-                stage     = 5;
-                tickDelay = 1;
+                stage = 5; tickDelay = 1;
             }
-
-            // Stage 5 — restore slot + rotation, cleanup
             case 5 -> {
                 sendSlot(oldSlot);
                 applyRotation(savedYaw, savedPitch);
@@ -247,19 +206,15 @@ public final class HitCob extends Module implements AttackListener {
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ──────────────────────────────────────────────────────────────────────────
-
     private void resetState() {
-        pending      = false;
-        stage        = 0;
-        tickDelay    = 0;
-        cobSlot      = -1;
-        oldSlot      = -1;
-        pendingHit   = null;
-        jitterYaw    = 0f;
-        jitterPitch  = 0f;
+        pending     = false;
+        stage       = 0;
+        tickDelay   = 0;
+        cobSlot     = -1;
+        oldSlot     = -1;
+        pendingHit  = null;
+        jitterYaw   = 0f;
+        jitterPitch = 0f;
     }
 
     private void applyRotation(float yaw, float pitch) {
@@ -315,4 +270,4 @@ public final class HitCob extends Module implements AttackListener {
                 MathHelper.wrapDegrees(yaw),
                 MathHelper.clamp(pitch, -89f, 89f)};
     }
-                    }
+                }
