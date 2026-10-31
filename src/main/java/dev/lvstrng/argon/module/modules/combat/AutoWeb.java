@@ -3,6 +3,7 @@ package dev.lvstrng.argon.module.modules.combat;
 import dev.lvstrng.argon.module.Category;
 import dev.lvstrng.argon.module.Module;
 import dev.lvstrng.argon.module.setting.BooleanSetting;
+import dev.lvstrng.argon.module.setting.KeybindSetting;
 import dev.lvstrng.argon.module.setting.NumberSetting;
 import dev.lvstrng.argon.utils.EncryptedString;
 import net.minecraft.block.Blocks;
@@ -16,10 +17,13 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.concurrent.ThreadLocalRandom;
 
 public final class AutoWeb extends Module {
+    private final BooleanSetting onKeyMode = new BooleanSetting(EncryptedString.of("On Key Mode"), true);
+    private final KeybindSetting activationKey = new KeybindSetting(EncryptedString.of("Activation Key"), -1, false);
     private final NumberSetting chance = new NumberSetting(EncryptedString.of("Chance"), 10, 100, 100, 1);
     private final NumberSetting predictionTime = new NumberSetting(EncryptedString.of("Prediction Time"), 0.1, 2.0, 0.5, 0.1);
     private final NumberSetting aimSpeed = new NumberSetting(EncryptedString.of("Aim Speed"), 1.0, 50.0, 30.0, 1.0);
@@ -27,24 +31,15 @@ public final class AutoWeb extends Module {
     private final BooleanSetting swapBack = new BooleanSetting(EncryptedString.of("SwapBack"), true);
 
     private long lastPlaceTime = 0;
+    private boolean wasPressed = false;
 
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
-                EncryptedString.of("Automatically places cobweb at target feet with prediction and bypass"),
+                EncryptedString.of("Mochi style macro auto web with single press key trigger and smooth bypass"),
                 -1,
                 Category.COMBAT);
 
-        addSettings(chance, predictionTime, aimSpeed, silentRotation, swapBack);
-    }
-
-    @Override
-    public void onEnable() {
-        super.onEnable();
-    }
-
-    @Override
-    public void onDisable() {
-        super.onDisable();
+        addSettings(onKeyMode, activationKey, chance, predictionTime, aimSpeed, silentRotation, swapBack);
     }
 
     @Override
@@ -52,8 +47,21 @@ public final class AutoWeb extends Module {
         if (mc.player == null || mc.world == null)
             return;
 
-        if (mc.targetedEntity instanceof PlayerEntity player && mc.options.attackKey.isPressed()) {
-            tryPlaceWeb(player);
+        if (onKeyMode.getValue()) {
+            if (activationKey.getKeyCode() != -1) {
+                boolean isPressed = GLFW.glfwGetKey(mc.getWindow().getHandle(), activationKey.getKeyCode()) == GLFW.GLFW_PRESS;
+                
+                if (isPressed && !wasPressed) {
+                    if (mc.targetedEntity instanceof PlayerEntity player) {
+                        tryPlaceWeb(player);
+                    }
+                }
+                wasPressed = isPressed;
+            }
+        } else {
+            if (mc.targetedEntity instanceof PlayerEntity player && mc.options.attackKey.isPressed()) {
+                tryPlaceWeb(player);
+            }
         }
     }
 
