@@ -3,10 +3,8 @@ package dev.lvstrng.argon.module.modules.combat;
 import dev.lvstrng.argon.module.Category;
 import dev.lvstrng.argon.module.Module;
 import dev.lvstrng.argon.module.setting.BooleanSetting;
-import dev.lvstrng.argon.module.setting.KeybindSetting;
 import dev.lvstrng.argon.module.setting.NumberSetting;
 import dev.lvstrng.argon.utils.EncryptedString;
-import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -17,57 +15,42 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import org.lwjgl.glfw.GLFW;
 
 import java.util.concurrent.ThreadLocalRandom;
 
 public final class AutoWeb extends Module {
-    private final BooleanSetting onKeyMode = new BooleanSetting(EncryptedString.of("On Key Mode"), true);
-    private final KeybindSetting activationKey = new KeybindSetting(EncryptedString.of("Activation Key"), -1, false);
     private final NumberSetting chance = new NumberSetting(EncryptedString.of("Chance"), 10, 100, 100, 1);
     private final NumberSetting predictionTime = new NumberSetting(EncryptedString.of("Prediction Time"), 0.1, 2.0, 0.5, 0.1);
     private final NumberSetting aimSpeed = new NumberSetting(EncryptedString.of("Aim Speed"), 1.0, 50.0, 30.0, 1.0);
     private final BooleanSetting silentRotation = new BooleanSetting(EncryptedString.of("Silent Rotation"), true);
     private final BooleanSetting swapBack = new BooleanSetting(EncryptedString.of("SwapBack"), true);
 
-    private long lastPlaceTime = 0;
-    private boolean wasPressed = false;
-
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
-                EncryptedString.of("Mochi style macro auto web with single press key trigger and smooth bypass"),
+                EncryptedString.of("One-shot macro auto web with smooth anti-cheat bypass"),
                 -1,
                 Category.COMBAT);
 
-        addSettings(onKeyMode, activationKey, chance, predictionTime, aimSpeed, silentRotation, swapBack);
+        addSettings(chance, predictionTime, aimSpeed, silentRotation, swapBack);
     }
 
-    @Override
-    public void onTick() {
+    // Module enable hote hi (key dabane par) yeh ek baar chalega aur turant off ho jayega
+    public void onEnable() {
+        super.onEnable();
+        tryPlaceWeb();
+        toggle(); // True macro style: Ek baar place karke automatically off ho jayega
+    }
+
+    public void onDisable() {
+        super.onDisable();
+    }
+
+    private void tryPlaceWeb() {
         if (mc.player == null || mc.world == null)
             return;
 
-        if (onKeyMode.getValue()) {
-            int key = activationKey.getValue(); // Corrected key fetching method
-            if (key != -1) {
-                boolean isPressed = GLFW.glfwGetKey(mc.getWindow().getHandle(), key) == GLFW.GLFW_PRESS;
-                
-                if (isPressed && !wasPressed) {
-                    if (mc.targetedEntity instanceof PlayerEntity player) {
-                        tryPlaceWeb(player);
-                    }
-                }
-                wasPressed = isPressed;
-            }
-        } else {
-            if (mc.targetedEntity instanceof PlayerEntity player && mc.options.attackKey.isPressed()) {
-                tryPlaceWeb(player);
-            }
-        }
-    }
-
-    private void tryPlaceWeb(PlayerEntity player) {
-        if (System.currentTimeMillis() - lastPlaceTime < 400)
+        PlayerEntity target = getTarget();
+        if (target == null)
             return;
 
         if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt())
@@ -77,16 +60,16 @@ public final class AutoWeb extends Module {
         if (cobwebSlot == -1)
             return;
 
-        Vec3d velocity = player.getVelocity();
+        Vec3d velocity = target.getVelocity();
         double predTime = predictionTime.getValue();
-        Vec3d playerPos = new Vec3d(player.getX(), player.getY(), player.getZ());
+        Vec3d playerPos = new Vec3d(target.getX(), target.getY(), target.getZ());
         Vec3d predictedPos = playerPos.add(velocity.x * predTime, velocity.y * predTime, velocity.z * predTime);
         
         BlockPos targetBlock = BlockPos.ofFloored(predictedPos);
         BlockPos placePos = targetBlock.down();
 
         if (!mc.world.getBlockState(placePos).isSolid()) {
-            placePos = player.getBlockPos().down();
+            placePos = target.getBlockPos().down();
         }
 
         Vec3d myPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
@@ -126,8 +109,24 @@ public final class AutoWeb extends Module {
         if (silentRotation.getValue()) {
             mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
         }
+    }
 
-        lastPlaceTime = System.currentTimeMillis();
+    private PlayerEntity getTarget() {
+        if (mc.targetedEntity instanceof PlayerEntity player) {
+            return player;
+        }
+        // Fallback: Agar crosshair par direct nahi hai toh aas-paas ka closest player dhoondh lega
+        PlayerEntity closest = null;
+        double minDist = 5.0;
+        for (PlayerEntity player : mc.world.getPlayers()) {
+            if (player == mc.player) continue;
+            double dist = mc.player.distanceTo(player);
+            if (dist < minDist) {
+                minDist = dist;
+                closest = player;
+            }
+        }
+        return closest;
     }
 
     private int getCobwebSlot() {
