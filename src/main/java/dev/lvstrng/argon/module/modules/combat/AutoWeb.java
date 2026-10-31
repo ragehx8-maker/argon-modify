@@ -102,11 +102,12 @@ public final class AutoWeb extends Module {
         mc.player.getInventory().setSelectedSlot(cobwebSlot);
         mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(cobwebSlot));
 
-        // 3. Place the cobweb block
+        // 3. Place the cobweb block & swing hand so server accepts the placement
         BlockHitResult blockHitResult = new BlockHitResult(vec3d4, Direction.UP, placePos, false);
         if (mc.interactionManager != null) {
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, blockHitResult);
         }
+        mc.player.swingHand(Hand.MAIN_HAND);
 
         // 4. Swap back to old slot and notify server
         if (swapBack.getValue()) {
