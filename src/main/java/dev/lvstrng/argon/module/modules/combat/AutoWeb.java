@@ -9,6 +9,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
@@ -95,22 +96,25 @@ public final class AutoWeb extends Module {
         // 1. Temporarily set player rotation for successful raycast interaction
         mc.player.setYaw(smoothedYaw);
         mc.player.setPitch(smoothedPitch);
-
-        // 2. Send rotation packet so enemies / server see the head moving
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(smoothedYaw, smoothedPitch, mc.player.isOnGround(), false));
 
-        // 3. Place the cobweb block
+        // 2. Select cobweb slot and notify server via packet
         mc.player.getInventory().setSelectedSlot(cobwebSlot);
+        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(cobwebSlot));
+
+        // 3. Place the cobweb block
         BlockHitResult blockHitResult = new BlockHitResult(vec3d4, Direction.UP, placePos, false);
         if (mc.interactionManager != null) {
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, blockHitResult);
         }
 
+        // 4. Swap back to old slot and notify server
         if (swapBack.getValue()) {
             mc.player.getInventory().setSelectedSlot(oldSlot);
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(oldSlot));
         }
 
-        // 4. Immediately restore client rotation so your own screen/camera remains completely silent & untouched
+        // 5. Immediately restore client rotation so your screen remains silent
         mc.player.setYaw(originalYaw);
         mc.player.setPitch(originalPitch);
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
