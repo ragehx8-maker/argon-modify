@@ -48,7 +48,7 @@ public final class HitCob extends Module implements AttackListener {
 		if (mc.world == null || mc.player == null)
 			return;
 
-		if (event.getTarget() instanceof PlayerEntity player) {
+		if (event.target instanceof PlayerEntity player) {
 			if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt())
 				return;
 
@@ -94,8 +94,8 @@ public final class HitCob extends Module implements AttackListener {
 			float originalYaw = mc.player.getYaw();
 			float originalPitch = mc.player.getPitch();
 
-			// True Silent Rotation via LookAndOnGround packet
-			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround()));
+			// Fixed 4-argument LookAndOnGround constructor
+			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), false));
 
 			mc.player.getInventory().setSelectedSlot(cobwebSlot);
 			BlockHitResult blockHitResult = new BlockHitResult(vec3d4, Direction.UP, placePos, false);
@@ -104,7 +104,7 @@ public final class HitCob extends Module implements AttackListener {
 			}
 			mc.player.getInventory().setSelectedSlot(oldSlot);
 
-			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround()));
+			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
 		}
 	}
 
@@ -125,4 +125,4 @@ public final class HitCob extends Module implements AttackListener {
 		float pitch = (float) (-Math.toDegrees(Math.atan2(diff.y, dist)));
 		return new float[]{MathHelper.wrapDegrees(yaw), MathHelper.clamp(pitch, -89.0F, 89.0F)};
 	}
-		}
+}
