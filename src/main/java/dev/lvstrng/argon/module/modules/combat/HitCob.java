@@ -48,7 +48,7 @@ public final class HitCob extends Module implements AttackListener {
 		if (mc.world == null || mc.player == null)
 			return;
 
-		if (event.entity instanceof PlayerEntity player) {
+		if (mc.targetedEntity instanceof PlayerEntity player) {
 			if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt())
 				return;
 
