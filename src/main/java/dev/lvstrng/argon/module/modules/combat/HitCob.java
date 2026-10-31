@@ -55,7 +55,7 @@ public final class HitCob extends Module implements AttackListener {
 
     @Override
     public void onEnable() {
-        mc.eventManager.register(AttackListener.class, this);
+        eventManager.add(AttackListener.class, this);
         if (!tickRegistered) {
             ClientTickEvents.END_CLIENT_TICK.register(client -> {
                 if (isEnabled()) onTick();
@@ -67,18 +67,18 @@ public final class HitCob extends Module implements AttackListener {
 
     @Override
     public void onDisable() {
-        mc.eventManager.unregister(AttackListener.class, this);
+        eventManager.remove(AttackListener.class, this);
         resetState();
         super.onDisable();
     }
 
     @Override
-    public void onAttack(AttackListener.AttackEvent event) {
+    public void onAttack(AttackEvent event) {
         if (!isEnabled()) return;
         if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
         if (pending) return;
 
-        long baseDelay  = delay.getValue().longValue();
+        long baseDelay  = (long) delay.getValue();
         long noiseRange = (long) (baseDelay * 0.15);
         long effectiveDelay = baseDelay
                 + ThreadLocalRandom.current().nextLong(-noiseRange, noiseRange + 1);
@@ -88,14 +88,13 @@ public final class HitCob extends Module implements AttackListener {
         if (target == mc.player) return;
         if (target.isDead() || target.isSpectator()) return;
 
-        if (ThreadLocalRandom.current().nextInt(100) >= chance.getValue().intValue()) return;
+        if (ThreadLocalRandom.current().nextInt(100) >= (int) chance.getValue()) return;
 
         int slot = getCobwebSlot();
         if (slot == -1) return;
 
         BlockPos feet = resolveTargetBlock(target);
 
-        // 1.21.x compatible checks — no getMaterial()
         if (mc.world.getBlockState(feet).getBlock() == Blocks.COBWEB) return;
         if (!mc.world.getBlockState(feet).getFluidState().isEmpty()) return;
         if (!mc.world.getBlockState(feet).isAir()
@@ -112,7 +111,7 @@ public final class HitCob extends Module implements AttackListener {
                 placeOn.getY() + 1.0,
                 placeOn.getZ() + 0.5 + offZ);
 
-        if (mc.player.getEyePos().distanceTo(hitVec) > reach.getValue().doubleValue()) return;
+        if (mc.player.getEyePos().distanceTo(hitVec) > reach.getValue()) return;
 
         pendingHit  = new BlockHitResult(hitVec, Direction.UP, placeOn, false);
         cobSlot     = slot;
@@ -140,7 +139,7 @@ public final class HitCob extends Module implements AttackListener {
     }
 
     private BlockPos resolveTargetBlock(PlayerEntity player) {
-        int steps = predict.getValue().intValue();
+        int steps = (int) predict.getValue();
         if (steps == 0) return player.getBlockPos();
 
         double vx = player.getVelocity().x;
@@ -159,7 +158,6 @@ public final class HitCob extends Module implements AttackListener {
             BlockPos next = BlockPos.ofFloored(x, y, z);
             if (mc.world != null) {
                 net.minecraft.block.BlockState s = mc.world.getBlockState(next);
-                // 1.21.x compatible — no getMaterial()
                 if (!s.isAir() && !s.isReplaceable()) break;
             }
             last = next;
