@@ -48,7 +48,7 @@ public final class HitCob extends Module implements AttackListener {
 		if (mc.world == null || mc.player == null)
 			return;
 
-		if (event.target instanceof PlayerEntity player) {
+		if (event.getEntity() instanceof PlayerEntity player) {
 			if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt())
 				return;
 
@@ -94,7 +94,7 @@ public final class HitCob extends Module implements AttackListener {
 			float originalYaw = mc.player.getYaw();
 			float originalPitch = mc.player.getPitch();
 
-			// Fixed 4-argument LookAndOnGround constructor
+			// True Silent Rotation packet
 			mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), false));
 
 			mc.player.getInventory().setSelectedSlot(cobwebSlot);
