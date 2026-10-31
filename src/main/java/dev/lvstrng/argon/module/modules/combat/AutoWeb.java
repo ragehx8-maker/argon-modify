@@ -25,9 +25,14 @@ public final class AutoWeb extends Module {
     private final NumberSetting aimSpeed = new NumberSetting(EncryptedString.of("Aim Speed"), 1.0, 50.0, 30.0, 1.0);
     private final BooleanSetting swapBack = new BooleanSetting(EncryptedString.of("SwapBack"), true);
 
+    private int tickCounter = 0;
+    private float originalYaw = 0;
+    private float originalPitch = 0;
+    private boolean isPlacing = false;
+
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
-                EncryptedString.of("Silent client-side view with visible enemy head rotation macro"),
+                EncryptedString.of("Anti-cheat bypass macro auto web"),
                 -1,
                 Category.COMBAT);
 
@@ -37,29 +42,58 @@ public final class AutoWeb extends Module {
     @Override
     public void onEnable() {
         super.onEnable();
+        if (mc.player == null || mc.world == null) {
+            toggle();
+            return;
+        }
+
+        originalYaw = mc.player.getYaw();
+        originalPitch = mc.player.getPitch();
+        tickCounter = 0;
+        isPlacing = true;
+        
         tryPlaceWeb();
-        toggle(); // Macro style: ek baar key dabane par chal kar auto-off ho jayega
     }
 
     @Override
     public void onDisable() {
         super.onDisable();
+        isPlacing = false;
+    }
+
+    @Override
+    public void onTick() {
+        super.onTick();
+        if (!isPlacing) return;
+
+        // 1 tick ka delay dekar original rotation safely restore karenge taaki server reject na kare
+        tickCounter++;
+        if (tickCounter >= 1) {
+            mc.player.setYaw(originalYaw);
+            mc.player.setPitch(originalPitch);
+            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
+            isPlacing = false;
+            toggle(); // Macro complete, module off
+        }
     }
 
     private void tryPlaceWeb() {
-        if (mc.player == null || mc.world == null)
-            return;
-
         PlayerEntity target = getTarget();
-        if (target == null)
+        if (target == null) {
+            toggle();
             return;
+        }
 
-        if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt())
+        if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt()) {
+            toggle();
             return;
+        }
 
         int cobwebSlot = getCobwebSlot();
-        if (cobwebSlot == -1)
+        if (cobwebSlot == -1) {
+            toggle();
             return;
+        }
 
         Vec3d velocity = target.getVelocity();
         double predTime = predictionTime.getValue();
@@ -75,16 +109,15 @@ public final class AutoWeb extends Module {
 
         Vec3d myPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
         double placeDist = myPos.distanceTo(Vec3d.ofCenter(placePos));
-        if (placeDist > 4.5)
+        if (placeDist > 4.5) {
+            toggle();
             return;
+        }
 
         int oldSlot = mc.player.getInventory().getSelectedSlot();
         Vec3d vec3d3 = Vec3d.ofCenter(placePos);
         Vec3d vec3d4 = vec3d3.add(0.0, 0.5, 0.0);
         float[] targetRots = computeRotations(vec3d4);
-
-        float originalYaw = mc.player.getYaw();
-        float originalPitch = mc.player.getPitch();
 
         float yawDiff = MathHelper.wrapDegrees(targetRots[0] - originalYaw);
         float pitchDiff = targetRots[1] - originalPitch;
@@ -93,32 +126,27 @@ public final class AutoWeb extends Module {
         float smoothedYaw = originalYaw + MathHelper.clamp(yawDiff, -maxDelta, maxDelta);
         float smoothedPitch = MathHelper.clamp(originalPitch + MathHelper.clamp(pitchDiff, -maxDelta, maxDelta), -89.0F, 89.0F);
 
-        // 1. Temporarily set player rotation for successful raycast interaction
+        // 1. Set rotation and send packet
         mc.player.setYaw(smoothedYaw);
         mc.player.setPitch(smoothedPitch);
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(smoothedYaw, smoothedPitch, mc.player.isOnGround(), false));
 
-        // 2. Select cobweb slot and notify server via packet
+        // 2. Select slot and notify server
         mc.player.getInventory().setSelectedSlot(cobwebSlot);
         mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(cobwebSlot));
 
-        // 3. Place the cobweb block & swing hand so server accepts the placement
+        // 3. Place block and swing hand
         BlockHitResult blockHitResult = new BlockHitResult(vec3d4, Direction.UP, placePos, false);
         if (mc.interactionManager != null) {
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, blockHitResult);
         }
         mc.player.swingHand(Hand.MAIN_HAND);
 
-        // 4. Swap back to old slot and notify server
+        // 4. Swap back slot
         if (swapBack.getValue()) {
             mc.player.getInventory().setSelectedSlot(oldSlot);
             mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(oldSlot));
         }
-
-        // 5. Immediately restore client rotation so your screen remains silent
-        mc.player.setYaw(originalYaw);
-        mc.player.setPitch(originalPitch);
-        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
     }
 
     private PlayerEntity getTarget() {
