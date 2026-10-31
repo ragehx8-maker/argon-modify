@@ -94,10 +94,12 @@ public final class HitCob extends Module implements AttackListener {
         if (slot == -1) return;
 
         BlockPos feet = resolveTargetBlock(target);
+
+        // 1.21.x compatible checks — no getMaterial()
         if (mc.world.getBlockState(feet).getBlock() == Blocks.COBWEB) return;
         if (!mc.world.getBlockState(feet).getFluidState().isEmpty()) return;
         if (!mc.world.getBlockState(feet).isAir()
-                && !mc.world.getBlockState(feet).getMaterial().isReplaceable()) return;
+                && !mc.world.getBlockState(feet).isReplaceable()) return;
 
         BlockPos placeOn = feet.down();
         if (mc.world.getBlockState(placeOn).isAir()) return;
@@ -157,7 +159,8 @@ public final class HitCob extends Module implements AttackListener {
             BlockPos next = BlockPos.ofFloored(x, y, z);
             if (mc.world != null) {
                 net.minecraft.block.BlockState s = mc.world.getBlockState(next);
-                if (!s.isAir() && !s.getMaterial().isReplaceable()) break;
+                // 1.21.x compatible — no getMaterial()
+                if (!s.isAir() && !s.isReplaceable()) break;
             }
             last = next;
         }
@@ -262,7 +265,7 @@ public final class HitCob extends Module implements AttackListener {
     }
 
     private float[] computeRotations(Vec3d vec) {
-        Vec3d d    = vec.subtract(mc.player.getEyePos());
+        Vec3d d     = vec.subtract(mc.player.getEyePos());
         double dist = Math.hypot(d.x, d.z);
         float yaw   = (float) Math.toDegrees(Math.atan2(d.z, d.x)) - 90f;
         float pitch = (float) -Math.toDegrees(Math.atan2(d.y, dist));
@@ -270,4 +273,4 @@ public final class HitCob extends Module implements AttackListener {
                 MathHelper.wrapDegrees(yaw),
                 MathHelper.clamp(pitch, -89f, 89f)};
     }
-                }
+            }
