@@ -60,55 +60,57 @@ public final class ShieldDisabler extends Module implements TickListener, Attack
 		if (mc.currentScreen != null)
 			return;
 
-		if(requireHoldAxe.getValue() && !(mc.player.getMainHandStack().getItem() instanceof AxeItem))
+		if (requireHoldAxe.getValue() && !(mc.player.getMainHandStack().getItem() instanceof AxeItem))
 			return;
+
+		boolean shouldBlock = false;
 
 		if (mc.crosshairTarget instanceof EntityHitResult entityHit) {
 			Entity entity = entityHit.getEntity();
 
-			if (mc.player.isUsingItem())
-				return;
+			if (!mc.player.isUsingItem() && entity instanceof PlayerEntity player) {
+				if (!WorldUtils.isShieldFacingAway(player)) {
+					if (player.isHolding(Items.SHIELD) && player.isBlocking()) {
+						shouldBlock = true;
 
-			if (entity instanceof PlayerEntity player) {
-				if (WorldUtils.isShieldFacingAway(player))
-					return;
+						if (switchClock > 0) {
+							if (previousSlot == -1)
+								previousSlot = mc.player.getInventory().getSelectedSlot();
 
-				if (player.isHolding(Items.SHIELD) && player.isBlocking()) {
-					if (switchClock > 0) {
-						if (previousSlot == -1)
-							previousSlot = mc.player.getInventory().getSelectedSlot();
+							switchClock--;
+							return;
+						}
 
-						switchClock--;
-						return;
-					}
-
-					if (InventoryUtils.selectAxe()) {
-						if (hitClock > 0) {
-							hitClock--;
-						} else {
-							if (clickSimulate.getValue())
-								MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-
-							WorldUtils.hitEntity(player, true);
-
-							if (stun.getValue()) {
+						if (InventoryUtils.selectAxe()) {
+							if (hitClock > 0) {
+								hitClock--;
+							} else {
 								if (clickSimulate.getValue())
 									MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
 
 								WorldUtils.hitEntity(player, true);
-							}
 
-							hitClock = hitDelay.getValueInt();
-							switchClock = switchDelay.getValueInt();
+								if (stun.getValue()) {
+									if (clickSimulate.getValue())
+										MouseSimulation.mouseClick(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+
+									WorldUtils.hitEntity(player, true);
+								}
+
+								hitClock = hitDelay.getValueInt();
+								switchClock = switchDelay.getValueInt();
+							}
 						}
 					}
-				} else if (previousSlot != -1) {
-					if (switchBack.getValue())
-						InventoryUtils.setInvSlot(previousSlot);
-
-					previousSlot = -1;
 				}
 			}
+		}
+
+		if (!shouldBlock && previousSlot != -1) {
+			if (switchBack.getValue())
+				InventoryUtils.setInvSlot(previousSlot);
+
+			previousSlot = -1;
 		}
 	}
 
