@@ -8,7 +8,7 @@ import dev.lvstrng.argon.utils.EncryptedString;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
+import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -25,182 +25,294 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class HitCob extends Module implements AttackListener {
 
-    private final NumberSetting chance = new NumberSetting(EncryptedString.of("Chance"), 2, 100, 35, 1);
-    private final NumberSetting reach = new NumberSetting(EncryptedString.of("Reach"), 3.0, 4.0, 3.1, 0.05);
-    private final NumberSetting delay = new NumberSetting(EncryptedString.of("Delay"), 100, 600, 300, 10);
+    private final NumberSetting chance  = new NumberSetting(EncryptedString.of("Chance"),  2,   100, 35,  1);
+    private final NumberSetting reach   = new NumberSetting(EncryptedString.of("Reach"),   2.8, 3.8, 3.0, 0.05);
+    private final NumberSetting delay   = new NumberSetting(EncryptedString.of("Delay"),   200, 800, 350, 10);
+    private final NumberSetting predict = new NumberSetting(EncryptedString.of("Predict"), 0,   4,   2,   1);
 
-    private BlockPos pendingPlace = null;
+    // State
+    private boolean pending       = false;
+    private int     stage         = 0;
+    private int     tickDelay     = 0;
+    private int     cobSlot       = -1;
+    private int     oldSlot       = -1;
     private BlockHitResult pendingHit = null;
-    private boolean pending = false;
-    private int stage = 0;
-    private int tickDelay = 0;
-    private int cobSlot = -1;
-    private int oldSlot = -1;
-    private float targetYaw, targetPitch, startYaw, startPitch;
-    private float savedYaw, savedPitch, savedBody, savedHead;
-    private long lastTime = 0L;
-    private boolean listenerRegistered = false;
+    private float   targetYaw     = 0f;
+    private float   targetPitch   = 0f;
+    private float   savedYaw      = 0f;
+    private float   savedPitch    = 0f;
+    private float   midYaw        = 0f;
+    private float   midPitch      = 0f;
+    private long    lastPlaceTime = 0L;
+    private boolean tickRegistered = false;
+
+    // Per-attempt randomised jitter so every placement looks unique
+    private float jitterYaw   = 0f;
+    private float jitterPitch = 0f;
 
     public HitCob() {
         super(EncryptedString.of("Hit Cob"),
-                EncryptedString.of("Silent cobweb at player feet"),
-                -1,
-                Category.COMBAT);
-        addSettings(chance, reach, delay);
+              EncryptedString.of("Silent cobweb at player feet"),
+              -1, Category.COMBAT);
+        addSettings(chance, reach, delay, predict);
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Lifecycle
+    // ──────────────────────────────────────────────────────────────────────────
 
     @Override
     public void onEnable() {
-        eventManager.add(AttackListener.class, this);
-        if (!listenerRegistered) {
+        mc.eventManager.register(AttackListener.class, this);
+        if (!tickRegistered) {
             ClientTickEvents.END_CLIENT_TICK.register(client -> {
-                if (this.isEnabled()) onTick();
+                if (isEnabled()) onTick();
             });
-            listenerRegistered = true;
+            tickRegistered = true;
         }
         super.onEnable();
     }
 
     @Override
     public void onDisable() {
-        eventManager.remove(AttackListener.class, this);
-        stage = 0;
-        pending = false;
-        pendingPlace = null;
-        pendingHit = null;
+        mc.eventManager.unregister(AttackListener.class, this);
+        resetState();
         super.onDisable();
     }
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // Attack trigger
+    // ──────────────────────────────────────────────────────────────────────────
+
     @Override
-    public void onAttack(AttackEvent event) {
-        if (!this.isEnabled()) return;
+    public void onAttack(dev.lvstrng.argon.event.events.AttackEvent event) {
+        if (!isEnabled()) return;
         if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
         if (pending) return;
-        if (System.currentTimeMillis() - lastTime < delay.getValue()) return;
 
-        if (!(mc.targetedEntity instanceof PlayerEntity player)) return;
-        if (player == mc.player || player.isDead() || player.isSpectator()) return;
-        if (ThreadLocalRandom.current().nextInt(100) >= chance.getValueInt()) return;
+        // Randomised delay with ±15 % noise so timing never looks mechanical
+        long baseDelay = delay.getValue().longValue();
+        long noiseRange = (long) (baseDelay * 0.15);
+        long effectiveDelay = baseDelay
+                + ThreadLocalRandom.current().nextLong(-noiseRange, noiseRange + 1);
+        if (System.currentTimeMillis() - lastPlaceTime < effectiveDelay) return;
+
+        if (!(mc.targetedEntity instanceof PlayerEntity target)) return;
+        if (target == mc.player) return;
+        if (target.isDead() || target.isSpectator()) return;
+
+        if (ThreadLocalRandom.current().nextInt(100) >= chance.getValue().intValue()) return;
 
         int slot = getCobwebSlot();
         if (slot == -1) return;
 
-        BlockPos feet = player.getBlockPos();
+        BlockPos feet = resolveTargetBlock(target);
         if (mc.world.getBlockState(feet).getBlock() == Blocks.COBWEB) return;
-        if (mc.world.getBlockState(feet).getBlock() == Blocks.WATER) return;
+        if (!mc.world.getBlockState(feet).getFluidState().isEmpty()) return;
+        if (!mc.world.getBlockState(feet).isAir()
+                && !mc.world.getBlockState(feet).getMaterial().isReplaceable()) return;
 
-        BlockPos placePos = feet.down();
-        if (mc.world.getBlockState(placePos).isAir()) return;
-        if (!mc.world.getBlockState(feet).isAir() && !mc.world.getBlockState(feet).isReplaceable()) return;
+        BlockPos placeOn = feet.down();
+        if (mc.world.getBlockState(placeOn).isAir()) return;
 
-        Vec3d hitVec = Vec3d.ofCenter(placePos).add(0.0, 0.5, 0.0);
-        if (mc.player.getEyePos().distanceTo(hitVec) > reach.getValue()) return;
+        // Slight random offset within the top face of placeOn — looks human
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        double offX = (rng.nextDouble() * 0.6) - 0.3;   // ±0.3
+        double offZ = (rng.nextDouble() * 0.6) - 0.3;
+        Vec3d hitVec = new Vec3d(
+                placeOn.getX() + 0.5 + offX,
+                placeOn.getY() + 1.0,
+                placeOn.getZ() + 0.5 + offZ);
 
-        pendingPlace = placePos;
-        pendingHit = new BlockHitResult(hitVec, Direction.UP, placePos, false);
-        cobSlot = slot;
-        oldSlot = mc.player.getInventory().getSelectedSlot();
+        if (mc.player.getEyePos().distanceTo(hitVec) > reach.getValue().doubleValue()) return;
 
-        float[] rot = computeRotations(hitVec);
-        targetYaw = rot[0];
-        targetPitch = rot[1];
-        startYaw = savedYaw = mc.player.getYaw();
-        startPitch = savedPitch = mc.player.getPitch();
-        savedBody = mc.player.bodyYaw;
-        savedHead = mc.player.headYaw;
+        // Commit
+        pendingHit  = new BlockHitResult(hitVec, Direction.UP, placeOn, false);
+        cobSlot     = slot;
+        oldSlot     = mc.player.getInventory().getSelectedSlot();
+        savedYaw    = mc.player.getYaw();
+        savedPitch  = mc.player.getPitch();
 
-        pending = true;
-        stage = 1;
-        tickDelay = 1;
-        lastTime = System.currentTimeMillis();
+        float[] rots = computeRotations(hitVec);
+        targetYaw   = rots[0];
+        targetPitch = rots[1];
+
+        // Small per-attempt jitter on final rotation (±1.5°) — defeats pattern detection
+        jitterYaw   = (rng.nextFloat() * 3f) - 1.5f;
+        jitterPitch = (rng.nextFloat() * 2f) - 1.0f;
+
+        // Mid-rotation halfway between saved and target
+        midYaw   = savedYaw   + lerpAngle(savedYaw,   targetYaw,   0.5f);
+        midPitch = savedPitch + (targetPitch - savedPitch) * 0.5f;
+
+        double vx = target.getVelocity().x;
+        double vz = target.getVelocity().z;
+        double horizSpeed = Math.sqrt(vx * vx + vz * vz);
+
+        pending   = true;
+        stage     = 1;
+        // Slightly randomised initial wait
+        tickDelay = (horizSpeed < 0.1 ? 1 : 2) + rng.nextInt(2);
     }
 
-    private void onTick() {
-        if (!this.isEnabled()) return;
-        if (!pending || mc.player == null || mc.getNetworkHandler() == null) return;
+    // ──────────────────────────────────────────────────────────────────────────
+    // Prediction
+    // ──────────────────────────────────────────────────────────────────────────
 
-        if (tickDelay > 0) {
-            tickDelay--;
-            return;
+    private BlockPos resolveTargetBlock(PlayerEntity player) {
+        int steps = predict.getValue().intValue();
+        if (steps == 0) return player.getBlockPos();
+
+        double vx = player.getVelocity().x;
+        double vy = player.getVelocity().y;
+        double vz = player.getVelocity().z;
+        if (Math.sqrt(vx * vx + vz * vz) < 0.08) return player.getBlockPos();
+
+        double x = player.getX(), y = player.getY(), z = player.getZ();
+        BlockPos last = player.getBlockPos();
+
+        for (int i = 0; i < steps; i++) {
+            vy = (vy - 0.08) * 0.98;
+            vx *= 0.91;
+            vz *= 0.91;
+            x += vx; y += vy; z += vz;
+            BlockPos next = BlockPos.ofFloored(x, y, z);
+            if (mc.world != null) {
+                net.minecraft.block.BlockState s = mc.world.getBlockState(next);
+                if (!s.isAir() && !s.getMaterial().isReplaceable()) break;
+            }
+            last = next;
         }
+        return last;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // State machine  (5 stages for smoother, more human-like rotation curve)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private void onTick() {
+        if (!pending) return;
+        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) {
+            resetState(); return;
+        }
+        if (tickDelay > 0) { tickDelay--; return; }
+
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
 
         switch (stage) {
+
+            // Stage 1 — rotate ~30 % toward target (first micro-step)
             case 1 -> {
-                float y = lerpAngle(startYaw, targetYaw, 0.45f);
-                float p = startPitch + (targetPitch - startPitch) * 0.45f;
-                applyRotation(y, p);
-                stage = 2;
+                float y1 = savedYaw   + lerpAngle(savedYaw,   targetYaw,   0.30f);
+                float p1 = savedPitch + (targetPitch - savedPitch) * 0.30f;
+                applyRotation(y1, p1);
+                stage     = 2;
                 tickDelay = 1;
             }
+
+            // Stage 2 — rotate to mid-point
             case 2 -> {
-                applyRotation(targetYaw, targetPitch);
-                sendSlot(cobSlot);
-                stage = 3;
+                applyRotation(midYaw, midPitch);
+                stage     = 3;
                 tickDelay = 1;
             }
+
+            // Stage 3 — snap to final rotation + slot switch
             case 3 -> {
+                applyRotation(
+                        MathHelper.wrapDegrees(targetYaw   + jitterYaw),
+                        MathHelper.clamp(targetPitch + jitterPitch, -89f, 89f));
+                sendSlot(cobSlot);
+                stage     = 4;
+                tickDelay = 1;
+            }
+
+            // Stage 4 — place cobweb + swing
+            case 4 -> {
                 mc.getNetworkHandler().sendPacket(
                         new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, pendingHit, 0));
-                mc.player.swingHand(Hand.MAIN_HAND);
-                stage = 4;
+                // Swing hand ~70 % of the time — constant swing looks botted
+                if (rng.nextInt(100) < 70) mc.player.swingHand(Hand.MAIN_HAND);
+                stage     = 5;
                 tickDelay = 1;
             }
-            case 4 -> {
-                if (oldSlot >= 0) sendSlot(oldSlot);
+
+            // Stage 5 — restore slot + rotation, cleanup
+            case 5 -> {
+                sendSlot(oldSlot);
                 applyRotation(savedYaw, savedPitch);
-                stage = 0;
-                pending = false;
-                pendingPlace = null;
-                pendingHit = null;
-            }
-            default -> {
-                stage = 0;
-                pending = false;
+                lastPlaceTime = System.currentTimeMillis();
+                resetState();
             }
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private void resetState() {
+        pending      = false;
+        stage        = 0;
+        tickDelay    = 0;
+        cobSlot      = -1;
+        oldSlot      = -1;
+        pendingHit   = null;
+        jitterYaw    = 0f;
+        jitterPitch  = 0f;
     }
 
     private void applyRotation(float yaw, float pitch) {
         mc.player.setYaw(yaw);
         mc.player.setPitch(pitch);
-        mc.player.bodyYaw = yaw;
-        mc.player.headYaw = yaw;
-        mc.player.prevYaw = yaw;
-        mc.player.prevPitch = pitch;
-        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-                yaw, pitch, mc.player.isOnGround(), mc.player.horizontalCollision));
+        mc.player.setBodyYaw(yaw);
+        mc.player.setHeadYaw(yaw);
+        mc.getNetworkHandler().sendPacket(
+                new PlayerMoveC2SPacket.LookAndOnGround(
+                        yaw, pitch,
+                        mc.player.isOnGround(),
+                        mc.player.horizontalCollision));
     }
 
     private void sendSlot(int slot) {
         try {
-            Constructor<?> c = UpdateSelectedSlotC2SPacket.class.getConstructors()[0];
-            Object pkt = c.getParameterCount() == 2
-                    ? c.newInstance(slot, true)
-                    : c.newInstance(slot);
-            mc.getNetworkHandler().sendPacket((UpdateSelectedSlotC2SPacket) pkt);
-        } catch (Exception e) {
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
-        }
+            Constructor<?>[] ctors = UpdateSelectedSlotC2SPacket.class.getDeclaredConstructors();
+            Constructor<?> chosen = null;
+            for (Constructor<?> c : ctors) {
+                if (c.getParameterCount() == 1 || c.getParameterCount() == 2) {
+                    chosen = c;
+                    if (c.getParameterCount() == 1) break;
+                }
+            }
+            if (chosen != null) {
+                chosen.setAccessible(true);
+                UpdateSelectedSlotC2SPacket pkt = chosen.getParameterCount() == 2
+                        ? (UpdateSelectedSlotC2SPacket) chosen.newInstance(slot, 0)
+                        : (UpdateSelectedSlotC2SPacket) chosen.newInstance(slot);
+                mc.getNetworkHandler().sendPacket(pkt);
+                return;
+            }
+        } catch (Exception ignored) {}
+        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
     }
 
     private float lerpAngle(float from, float to, float t) {
-        float diff = ((to - from + 540.0f) % 360.0f) - 180.0f;
-        return from + diff * t;
+        return (((to - from + 540f) % 360f) - 180f) * t;
     }
 
     private int getCobwebSlot() {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (!stack.isEmpty() && stack.getItem() == Items.COBWEB) return i;
-        }
+        for (int i = 0; i < 9; i++)
+            if (mc.player.getInventory().getStack(i).getItem() == Items.COBWEB) return i;
         return -1;
     }
 
     private float[] computeRotations(Vec3d vec) {
-        Vec3d diff = vec.subtract(mc.player.getEyePos());
-        double dist = Math.hypot(diff.x, diff.z);
-        float yaw = (float) Math.toDegrees(Math.atan2(diff.z, diff.x)) - 90.0f;
-        float pitch = (float) (-Math.toDegrees(Math.atan2(diff.y, dist)));
-        return new float[]{MathHelper.wrapDegrees(yaw), MathHelper.clamp(pitch, -89.0f, 89.0f)};
+        Vec3d d    = vec.subtract(mc.player.getEyePos());
+        double dist = Math.hypot(d.x, d.z);
+        float yaw   = (float) Math.toDegrees(Math.atan2(d.z, d.x)) - 90f;
+        float pitch = (float) -Math.toDegrees(Math.atan2(d.y, dist));
+        return new float[]{
+                MathHelper.wrapDegrees(yaw),
+                MathHelper.clamp(pitch, -89f, 89f)};
     }
-}
+                    }
