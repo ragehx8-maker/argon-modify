@@ -73,10 +73,12 @@ public final class ShieldDisabler extends Module implements TickListener, Attack
 					if (player.isHolding(Items.SHIELD) && player.isBlocking()) {
 						shouldBlock = true;
 
-						if (switchClock > 0) {
-							if (previousSlot == -1)
-								previousSlot = mc.player.getInventory().getSelectedSlot();
+						// Fix: Slot turant save ho jayega chahe delay 0 ho ya kuch bhi
+						if (previousSlot == -1) {
+							previousSlot = mc.player.getInventory().getSelectedSlot();
+						}
 
+						if (switchClock > 0) {
 							switchClock--;
 							return;
 						}
@@ -106,10 +108,11 @@ public final class ShieldDisabler extends Module implements TickListener, Attack
 			}
 		}
 
+		// Jaise hi shield hat ya target chhut gaya, turant sword par switch back kar lega
 		if (!shouldBlock && previousSlot != -1) {
-			if (switchBack.getValue())
+			if (switchBack.getValue()) {
 				InventoryUtils.setInvSlot(previousSlot);
-
+			}
 			previousSlot = -1;
 		}
 	}
