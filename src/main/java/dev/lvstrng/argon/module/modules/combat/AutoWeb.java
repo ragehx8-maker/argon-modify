@@ -22,25 +22,25 @@ public final class AutoWeb extends Module {
     private final NumberSetting chance = new NumberSetting(EncryptedString.of("Chance"), 10, 100, 100, 1);
     private final NumberSetting predictionTime = new NumberSetting(EncryptedString.of("Prediction Time"), 0.1, 2.0, 0.5, 0.1);
     private final NumberSetting aimSpeed = new NumberSetting(EncryptedString.of("Aim Speed"), 1.0, 50.0, 30.0, 1.0);
-    private final BooleanSetting silentRotation = new BooleanSetting(EncryptedString.of("Silent Rotation"), true);
     private final BooleanSetting swapBack = new BooleanSetting(EncryptedString.of("SwapBack"), true);
 
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
-                EncryptedString.of("One-shot macro auto web with smooth anti-cheat bypass"),
+                EncryptedString.of("Silent client-side view with visible enemy head rotation macro"),
                 -1,
                 Category.COMBAT);
 
-        addSettings(chance, predictionTime, aimSpeed, silentRotation, swapBack);
+        addSettings(chance, predictionTime, aimSpeed, swapBack);
     }
 
-    // Module enable hote hi (key dabane par) yeh ek baar chalega aur turant off ho jayega
+    @Override
     public void onEnable() {
         super.onEnable();
         tryPlaceWeb();
-        toggle(); // True macro style: Ek baar place karke automatically off ho jayega
+        toggle(); // Macro style: ek baar key dabane par chal kar auto-off ho jayega
     }
 
+    @Override
     public void onDisable() {
         super.onDisable();
     }
@@ -88,14 +88,18 @@ public final class AutoWeb extends Module {
         float yawDiff = MathHelper.wrapDegrees(targetRots[0] - originalYaw);
         float pitchDiff = targetRots[1] - originalPitch;
         
-        double maxDelta = aimSpeed.getValue() * 3.5; 
-        float smoothedYaw = originalYaw + MathHelper.clamp(yawDiff, (float)-maxDelta, (float)maxDelta);
-        float smoothedPitch = MathHelper.clamp(originalPitch + MathHelper.clamp(pitchDiff, (float)-maxDelta, (float)maxDelta), -89.0F, 89.0F);
+        float maxDelta = (float) (aimSpeed.getValue() * 3.5); 
+        float smoothedYaw = originalYaw + MathHelper.clamp(yawDiff, -maxDelta, maxDelta);
+        float smoothedPitch = MathHelper.clamp(originalPitch + MathHelper.clamp(pitchDiff, -maxDelta, maxDelta), -89.0F, 89.0F);
 
-        if (silentRotation.getValue()) {
-            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(smoothedYaw, smoothedPitch, mc.player.isOnGround(), false));
-        }
+        // 1. Temporarily set player rotation for successful raycast interaction
+        mc.player.setYaw(smoothedYaw);
+        mc.player.setPitch(smoothedPitch);
 
+        // 2. Send rotation packet so enemies / server see the head moving
+        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(smoothedYaw, smoothedPitch, mc.player.isOnGround(), false));
+
+        // 3. Place the cobweb block
         mc.player.getInventory().setSelectedSlot(cobwebSlot);
         BlockHitResult blockHitResult = new BlockHitResult(vec3d4, Direction.UP, placePos, false);
         if (mc.interactionManager != null) {
@@ -106,16 +110,16 @@ public final class AutoWeb extends Module {
             mc.player.getInventory().setSelectedSlot(oldSlot);
         }
 
-        if (silentRotation.getValue()) {
-            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
-        }
+        // 4. Immediately restore client rotation so your own screen/camera remains completely silent & untouched
+        mc.player.setYaw(originalYaw);
+        mc.player.setPitch(originalPitch);
+        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(originalYaw, originalPitch, mc.player.isOnGround(), false));
     }
 
     private PlayerEntity getTarget() {
         if (mc.targetedEntity instanceof PlayerEntity player) {
             return player;
         }
-        // Fallback: Agar crosshair par direct nahi hai toh aas-paas ka closest player dhoondh lega
         PlayerEntity closest = null;
         double minDist = 5.0;
         for (PlayerEntity player : mc.world.getPlayers()) {
