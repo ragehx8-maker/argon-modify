@@ -1,8 +1,6 @@
 package dev.lvstrng.argon.module.modules.combat;
 
-import dev.lvstrng.argon.event.events.PacketSendListener;
 import dev.lvstrng.argon.event.events.TickListener;
-import dev.lvstrng.argon.imixin.IServerboundMovePlayerPacket;
 import dev.lvstrng.argon.module.Category;
 import dev.lvstrng.argon.module.Module;
 import dev.lvstrng.argon.module.setting.BooleanSetting;
@@ -24,7 +22,7 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.concurrent.ThreadLocalRandom;
 
-public final class AutoWeb extends Module implements TickListener, PacketSendListener {
+public final class AutoWeb extends Module implements TickListener {
 
     private final NumberSetting chance = new NumberSetting(
             EncryptedString.of("Chance"), 10, 100, 100, 1);
@@ -35,17 +33,15 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
     private final BooleanSetting swapBack = new BooleanSetting(
             EncryptedString.of("SwapBack"), true);
 
-    private int     stage        = 0;
-    private int     tickDelay    = 0;
-    private int     cobSlot      = -1;
-    private int     oldSlot      = -1;
+    private int   stage     = 0;
+    private int   tickDelay = 0;
+    private int   cobSlot   = -1;
+    private int   oldSlot   = -1;
     private BlockHitResult pendingHit = null;
-
-    private boolean shouldInject = false;
-    private float   injectYaw    = 0f;
-    private float   injectPitch  = 0f;
-    private float   savedYaw     = 0f;
-    private float   savedPitch   = 0f;
+    private float savedYaw   = 0f;
+    private float savedPitch = 0f;
+    private float targetYaw  = 0f;
+    private float targetPitch = 0f;
 
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
@@ -57,7 +53,6 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
     @Override
     public void onEnable() {
         eventManager.add(TickListener.class, this);
-        eventManager.add(PacketSendListener.class, this);
         super.onEnable();
         if (!init()) disable();
     }
@@ -65,21 +60,8 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
     @Override
     public void onDisable() {
         eventManager.remove(TickListener.class, this);
-        eventManager.remove(PacketSendListener.class, this);
         resetState();
         super.onDisable();
-    }
-
-    @Override
-    public void onPacketSend(PacketSendListener.PacketSendEvent event) {
-        if (!shouldInject) return;
-        if (!(event.packet instanceof PlayerMoveC2SPacket)) return;
-
-        IServerboundMovePlayerPacket packet =
-                (IServerboundMovePlayerPacket) event.packet;
-        packet.setYRot(injectYaw);
-        packet.setXRot(injectPitch);
-        packet.setHasRot(true);
     }
 
     private boolean init() {
@@ -111,40 +93,31 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         BlockPos placeOn = targetBlock.down();
         if (mc.world.getBlockState(placeOn).isAir()) {
             placeOn = target.getBlockPos().down();
-            targetBlock = placeOn.up();
         }
         if (mc.world.getBlockState(placeOn).isAir()) return false;
 
         ThreadLocalRandom rng = ThreadLocalRandom.current();
-        double offX = (rng.nextDouble() * 0.4) - 0.2;
-        double offZ = (rng.nextDouble() * 0.4) - 0.2;
         Vec3d hitVec = new Vec3d(
-                placeOn.getX() + 0.5 + offX,
+                placeOn.getX() + 0.5 + (rng.nextDouble() * 0.4 - 0.2),
                 placeOn.getY() + 1.0,
-                placeOn.getZ() + 0.5 + offZ);
+                placeOn.getZ() + 0.5 + (rng.nextDouble() * 0.4 - 0.2));
 
         if (mc.player.getEyePos().distanceTo(hitVec) > 4.5) return false;
 
-        pendingHit = new BlockHitResult(hitVec, Direction.UP, placeOn, false);
-        cobSlot    = slot;
-        oldSlot    = mc.player.getInventory().getSelectedSlot();
-        savedYaw   = mc.player.getYaw();
-        savedPitch = mc.player.getPitch();
+        pendingHit  = new BlockHitResult(hitVec, Direction.UP, placeOn, false);
+        cobSlot     = slot;
+        oldSlot     = mc.player.getInventory().getSelectedSlot();
+        savedYaw    = mc.player.getYaw();
+        savedPitch  = mc.player.getPitch();
 
         float[] rots = computeRotations(hitVec);
-        float targetYaw   = rots[0];
-        float targetPitch = rots[1];
-
-        float maxDelta  = (float) (aimSpeed.getValue() * 3.5);
-        float yawDiff   = MathHelper.wrapDegrees(targetYaw - savedYaw);
-        float pitchDiff = targetPitch - savedPitch;
-
-        injectYaw   = savedYaw + MathHelper.clamp(yawDiff, -maxDelta, maxDelta);
-        injectPitch = MathHelper.clamp(
-                savedPitch + MathHelper.clamp(pitchDiff, -maxDelta, maxDelta),
+        float maxDelta = (float) (aimSpeed.getValue() * 3.5);
+        targetYaw   = savedYaw + MathHelper.clamp(
+                MathHelper.wrapDegrees(rots[0] - savedYaw), -maxDelta, maxDelta);
+        targetPitch = MathHelper.clamp(
+                savedPitch + MathHelper.clamp(rots[1] - savedPitch, -maxDelta, maxDelta),
                 -89f, 89f);
 
-        shouldInject = true;
         stage     = 1;
         tickDelay = 1;
         return true;
@@ -159,12 +132,17 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         if (tickDelay > 0) { tickDelay--; return; }
 
         switch (stage) {
+
+            // Stage 1 — server ko rotation bhejo (camera nahi hilega)
             case 1 -> {
+                sendSilentRotation(targetYaw, targetPitch);
                 mc.getNetworkHandler().sendPacket(
                         new UpdateSelectedSlotC2SPacket(cobSlot));
                 stage = 2;
                 tickDelay = 1;
             }
+
+            // Stage 2 — cobweb place karo
             case 2 -> {
                 mc.getNetworkHandler().sendPacket(
                         new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, pendingHit, 0));
@@ -172,16 +150,34 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
                 stage = 3;
                 tickDelay = 1;
             }
+
+            // Stage 3 — restore karo
             case 3 -> {
                 if (swapBack.getValue()) {
                     mc.getNetworkHandler().sendPacket(
                             new UpdateSelectedSlotC2SPacket(oldSlot));
                     mc.player.getInventory().setSelectedSlot(oldSlot);
                 }
-                shouldInject = false;
+                // Server ko saved rotation wapas bhejo
+                sendSilentRotation(savedYaw, savedPitch);
                 disable();
             }
         }
+    }
+
+    /**
+     * Server ko rotation packet bhejta hai.
+     * mc.player.yaw/pitch NAHI badlta = screen silent.
+     * Dusron ko head ghoomta dikhega.
+     */
+    private void sendSilentRotation(float yaw, float pitch) {
+        mc.player.setBodyYaw(yaw);
+        mc.player.setHeadYaw(yaw);
+        mc.getNetworkHandler().sendPacket(
+                new PlayerMoveC2SPacket.LookAndOnGround(
+                        yaw, pitch,
+                        mc.player.isOnGround(),
+                        mc.player.horizontalCollision));
     }
 
     private PlayerEntity getTarget() {
@@ -217,16 +213,15 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
     }
 
     private void resetState() {
-        stage        = 0;
-        tickDelay    = 0;
-        cobSlot      = -1;
-        oldSlot      = -1;
-        pendingHit   = null;
-        shouldInject = false;
+        stage      = 0;
+        tickDelay  = 0;
+        cobSlot    = -1;
+        oldSlot    = -1;
+        pendingHit = null;
     }
 
     private void disable() {
         resetState();
         if (isEnabled()) toggle();
     }
-             }
+}
