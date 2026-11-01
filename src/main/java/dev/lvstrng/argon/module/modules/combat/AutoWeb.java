@@ -32,49 +32,121 @@ public final class AutoWeb extends Module implements TickListener {
             EncryptedString.of("Aim Speed"), 1.0, 50.0, 30.0, 1.0);
     private final BooleanSetting swapBack = new BooleanSetting(
             EncryptedString.of("SwapBack"), true);
+    private final NumberSetting cooldown = new NumberSetting(
+            EncryptedString.of("Cooldown"), 5, 40, 10, 1);
 
-    private int   stage     = 0;
-    private int   tickDelay = 0;
-    private int   cobSlot   = -1;
-    private int   oldSlot   = -1;
-    private BlockHitResult pendingHit = null;
-    private float savedYaw   = 0f;
-    private float savedPitch = 0f;
-    private float targetYaw  = 0f;
+    private int   stage       = 0;
+    private int   tickDelay   = 0;
+    private int   cooldownTicks = 0;
+    private int   cobSlot     = -1;
+    private int   oldSlot     = -1;
+    private BlockHitResult pendingHit  = null;
+    private float savedYaw    = 0f;
+    private float savedPitch  = 0f;
+    private float targetYaw   = 0f;
     private float targetPitch = 0f;
 
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
                 EncryptedString.of("Silent cobweb macro"),
                 -1, Category.COMBAT);
-        addSettings(chance, predictionTime, aimSpeed, swapBack);
+        addSettings(chance, predictionTime, aimSpeed, swapBack, cooldown);
     }
 
     @Override
     public void onEnable() {
         eventManager.add(TickListener.class, this);
+        resetState();
         super.onEnable();
-        if (!init()) disable();
     }
 
     @Override
     public void onDisable() {
         eventManager.remove(TickListener.class, this);
+        // Rotation restore karo agar mid-execution disable hua
+        if (stage > 0 && mc.player != null && mc.getNetworkHandler() != null) {
+            sendRotationPacket(savedYaw, savedPitch);
+            if (swapBack.getValue() && oldSlot != -1) {
+                mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(oldSlot));
+                mc.player.getInventory().setSelectedSlot(oldSlot);
+            }
+        }
         resetState();
         super.onDisable();
     }
 
-    private boolean init() {
+    @Override
+    public void onTick() {
         if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null)
-            return false;
+            return;
+
+        // Cooldown countdown
+        if (cooldownTicks > 0) {
+            cooldownTicks--;
+            return;
+        }
+
+        // Stage 0 — try start
+        if (stage == 0) {
+            tryInit();
+            return;
+        }
+
+        if (tickDelay > 0) { tickDelay--; return; }
+
+        switch (stage) {
+
+            // Stage 1 — rotation packet bhejo
+            case 1 -> {
+                sendRotationPacket(targetYaw, targetPitch);
+                stage = 2;
+                tickDelay = 1; // 1 tick wait — server rotation process kare
+            }
+
+            // Stage 2 — slot switch + rotation confirm
+            case 2 -> {
+                sendRotationPacket(targetYaw, targetPitch); // dobara bhejo confirm ke liye
+                mc.getNetworkHandler().sendPacket(
+                        new UpdateSelectedSlotC2SPacket(cobSlot));
+                stage = 3;
+                tickDelay = 1;
+            }
+
+            // Stage 3 — place karo
+            case 3 -> {
+                sendRotationPacket(targetYaw, targetPitch); // ensure rotation sahi hai
+                mc.getNetworkHandler().sendPacket(
+                        new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, pendingHit, 0));
+                if (ThreadLocalRandom.current().nextInt(100) < 70)
+                    mc.player.swingHand(Hand.MAIN_HAND);
+                stage = 4;
+                tickDelay = 1;
+            }
+
+            // Stage 4 — restore
+            case 4 -> {
+                if (swapBack.getValue()) {
+                    mc.getNetworkHandler().sendPacket(
+                            new UpdateSelectedSlotC2SPacket(oldSlot));
+                    mc.player.getInventory().setSelectedSlot(oldSlot);
+                }
+                sendRotationPacket(savedYaw, savedPitch);
+                cooldownTicks = (int) cooldown.getValue();
+                resetState();
+                // Auto-off nahi — module ON rehta hai, cooldown ke baad phir try karega
+            }
+        }
+    }
+
+    private void tryInit() {
         if (ThreadLocalRandom.current().nextInt(100) >= (int) chance.getValue())
-            return false;
+            return;
 
         PlayerEntity target = getTarget();
-        if (target == null) return false;
+        if (target == null) return;
 
         int slot = getCobwebSlot();
-        if (slot == -1) return false;
+        if (slot == -1) return;
 
         double predTime = predictionTime.getValue();
         Vec3d vel = target.getVelocity();
@@ -85,16 +157,18 @@ public final class AutoWeb extends Module implements TickListener {
 
         BlockPos targetBlock = BlockPos.ofFloored(predicted);
 
-        if (mc.world.getBlockState(targetBlock).getBlock() == Blocks.COBWEB) return false;
-        if (!mc.world.getBlockState(targetBlock).getFluidState().isEmpty()) return false;
+        // Block validity
+        if (mc.world.getBlockState(targetBlock).getBlock() == Blocks.COBWEB) return;
+        if (!mc.world.getBlockState(targetBlock).getFluidState().isEmpty()) return;
         if (!mc.world.getBlockState(targetBlock).isAir()
-                && !mc.world.getBlockState(targetBlock).isReplaceable()) return false;
+                && !mc.world.getBlockState(targetBlock).isReplaceable()) return;
 
         BlockPos placeOn = targetBlock.down();
         if (mc.world.getBlockState(placeOn).isAir()) {
             placeOn = target.getBlockPos().down();
+            targetBlock = placeOn.up();
         }
-        if (mc.world.getBlockState(placeOn).isAir()) return false;
+        if (mc.world.getBlockState(placeOn).isAir()) return;
 
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         Vec3d hitVec = new Vec3d(
@@ -102,7 +176,7 @@ public final class AutoWeb extends Module implements TickListener {
                 placeOn.getY() + 1.0,
                 placeOn.getZ() + 0.5 + (rng.nextDouble() * 0.4 - 0.2));
 
-        if (mc.player.getEyePos().distanceTo(hitVec) > 4.5) return false;
+        if (mc.player.getEyePos().distanceTo(hitVec) > 4.5) return;
 
         pendingHit  = new BlockHitResult(hitVec, Direction.UP, placeOn, false);
         cobSlot     = slot;
@@ -120,59 +194,15 @@ public final class AutoWeb extends Module implements TickListener {
 
         stage     = 1;
         tickDelay = 1;
-        return true;
-    }
-
-    @Override
-    public void onTick() {
-        if (stage == 0) return;
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) {
-            disable(); return;
-        }
-        if (tickDelay > 0) { tickDelay--; return; }
-
-        switch (stage) {
-
-            // Stage 1 — server ko rotation bhejo (camera nahi hilega)
-            case 1 -> {
-                sendSilentRotation(targetYaw, targetPitch);
-                mc.getNetworkHandler().sendPacket(
-                        new UpdateSelectedSlotC2SPacket(cobSlot));
-                stage = 2;
-                tickDelay = 1;
-            }
-
-            // Stage 2 — cobweb place karo
-            case 2 -> {
-                mc.getNetworkHandler().sendPacket(
-                        new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, pendingHit, 0));
-                mc.player.swingHand(Hand.MAIN_HAND);
-                stage = 3;
-                tickDelay = 1;
-            }
-
-            // Stage 3 — restore karo
-            case 3 -> {
-                if (swapBack.getValue()) {
-                    mc.getNetworkHandler().sendPacket(
-                            new UpdateSelectedSlotC2SPacket(oldSlot));
-                    mc.player.getInventory().setSelectedSlot(oldSlot);
-                }
-                // Server ko saved rotation wapas bhejo
-                sendSilentRotation(savedYaw, savedPitch);
-                disable();
-            }
-        }
     }
 
     /**
      * Server ko rotation packet bhejta hai.
-     * mc.player.yaw/pitch NAHI badlta = screen silent.
-     * Dusron ko head ghoomta dikhega.
+     * setYaw/setPitch NAHI karte — screen nahi hilega.
+     * setBodyYaw/setHeadYaw bhi NAHI — stutter nahi aayega.
+     * Sirf server ko packet jaata hai.
      */
-    private void sendSilentRotation(float yaw, float pitch) {
-        mc.player.setBodyYaw(yaw);
-        mc.player.setHeadYaw(yaw);
+    private void sendRotationPacket(float yaw, float pitch) {
         mc.getNetworkHandler().sendPacket(
                 new PlayerMoveC2SPacket.LookAndOnGround(
                         yaw, pitch,
@@ -219,9 +249,4 @@ public final class AutoWeb extends Module implements TickListener {
         oldSlot    = -1;
         pendingHit = null;
     }
-
-    private void disable() {
-        resetState();
-        if (isEnabled()) toggle();
-    }
-}
+            }
