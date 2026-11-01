@@ -16,6 +16,7 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
@@ -34,27 +35,21 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
     private final BooleanSetting swapBack = new BooleanSetting(
             EncryptedString.of("SwapBack"), true);
 
-    // State machine
     private int     stage        = 0;
     private int     tickDelay    = 0;
     private int     cobSlot      = -1;
     private int     oldSlot      = -1;
     private BlockHitResult pendingHit = null;
 
-    // Silent rotation
     private boolean shouldInject = false;
     private float   injectYaw    = 0f;
     private float   injectPitch  = 0f;
-
-    // Saved rotation
     private float   savedYaw     = 0f;
     private float   savedPitch   = 0f;
-    private float   targetYaw    = 0f;
-    private float   targetPitch  = 0f;
 
     public AutoWeb() {
         super(EncryptedString.of("Auto Web"),
-                EncryptedString.of("Silent cobweb macro — press key once"),
+                EncryptedString.of("Silent cobweb macro"),
                 -1, Category.COMBAT);
         addSettings(chance, predictionTime, aimSpeed, swapBack);
     }
@@ -64,12 +59,7 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         eventManager.add(TickListener.class, this);
         eventManager.add(PacketSendListener.class, this);
         super.onEnable();
-
-        // Macro: onEnable pe seedha start
-        if (!init()) {
-            // Conditions meet nahi hui — off ho jao
-            disable();
-        }
+        if (!init()) disable();
     }
 
     @Override
@@ -80,26 +70,21 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         super.onDisable();
     }
 
-    // ── SILENT ROTATION ────────────────────────────────────────────────────
-    // PlayerMoveC2SPacket ko intercept karke yaw/pitch inject karte hain
-    // mc.player.yaw/pitch kabhi nahi badlta — screen silent rehta hai
     @Override
     public void onPacketSend(PacketSendListener.PacketSendEvent event) {
         if (!shouldInject) return;
-        if (!(event.getPacket() instanceof PlayerMoveC2SPacket)) return;
+        if (!(event.packet instanceof PlayerMoveC2SPacket)) return;
 
         IServerboundMovePlayerPacket packet =
-                (IServerboundMovePlayerPacket) event.getPacket();
+                (IServerboundMovePlayerPacket) event.packet;
         packet.setYRot(injectYaw);
         packet.setXRot(injectPitch);
         packet.setHasRot(true);
     }
 
-    // ── INIT — onEnable pe chalta hai ──────────────────────────────────────
     private boolean init() {
         if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null)
             return false;
-
         if (ThreadLocalRandom.current().nextInt(100) >= (int) chance.getValue())
             return false;
 
@@ -109,7 +94,6 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         int slot = getCobwebSlot();
         if (slot == -1) return false;
 
-        // Prediction
         double predTime = predictionTime.getValue();
         Vec3d vel = target.getVelocity();
         Vec3d predicted = new Vec3d(
@@ -119,21 +103,18 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
 
         BlockPos targetBlock = BlockPos.ofFloored(predicted);
 
-        // Block validity check
         if (mc.world.getBlockState(targetBlock).getBlock() == Blocks.COBWEB) return false;
         if (!mc.world.getBlockState(targetBlock).getFluidState().isEmpty()) return false;
         if (!mc.world.getBlockState(targetBlock).isAir()
                 && !mc.world.getBlockState(targetBlock).isReplaceable()) return false;
 
         BlockPos placeOn = targetBlock.down();
-        // Fallback agar neeche solid nahi
         if (mc.world.getBlockState(placeOn).isAir()) {
             placeOn = target.getBlockPos().down();
             targetBlock = placeOn.up();
         }
         if (mc.world.getBlockState(placeOn).isAir()) return false;
 
-        // Reach check
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         double offX = (rng.nextDouble() * 0.4) - 0.2;
         double offZ = (rng.nextDouble() * 0.4) - 0.2;
@@ -144,7 +125,6 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
 
         if (mc.player.getEyePos().distanceTo(hitVec) > 4.5) return false;
 
-        // Store everything
         pendingHit = new BlockHitResult(hitVec, Direction.UP, placeOn, false);
         cobSlot    = slot;
         oldSlot    = mc.player.getInventory().getSelectedSlot();
@@ -152,25 +132,24 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         savedPitch = mc.player.getPitch();
 
         float[] rots = computeRotations(hitVec);
-        targetYaw   = rots[0];
-        targetPitch = rots[1];
+        float targetYaw   = rots[0];
+        float targetPitch = rots[1];
 
-        // Aim speed se smooth rotation
-        float maxDelta = (float) (aimSpeed.getValue() * 3.5);
-        float yawDiff  = MathHelper.wrapDegrees(targetYaw - savedYaw);
+        float maxDelta  = (float) (aimSpeed.getValue() * 3.5);
+        float yawDiff   = MathHelper.wrapDegrees(targetYaw - savedYaw);
         float pitchDiff = targetPitch - savedPitch;
-        injectYaw   = savedYaw   + MathHelper.clamp(yawDiff,   -maxDelta, maxDelta);
+
+        injectYaw   = savedYaw + MathHelper.clamp(yawDiff, -maxDelta, maxDelta);
         injectPitch = MathHelper.clamp(
                 savedPitch + MathHelper.clamp(pitchDiff, -maxDelta, maxDelta),
                 -89f, 89f);
 
         shouldInject = true;
-        stage = 1;
+        stage     = 1;
         tickDelay = 1;
         return true;
     }
 
-    // ── TICK STATE MACHINE ─────────────────────────────────────────────────
     @Override
     public void onTick() {
         if (stage == 0) return;
@@ -180,54 +159,37 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         if (tickDelay > 0) { tickDelay--; return; }
 
         switch (stage) {
-
-            // Stage 1 — rotation inject ho rahi hai (1 tick)
             case 1 -> {
-                // Rotation already inject ho rahi hai via PacketSendListener
-                // Cobweb slot select karo
-                mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(cobSlot));
+                mc.getNetworkHandler().sendPacket(
+                        new UpdateSelectedSlotC2SPacket(cobSlot));
                 stage = 2;
                 tickDelay = 1;
             }
-
-            // Stage 2 — cobweb place karo
             case 2 -> {
-                // Direct server packet — client raycast bypass
                 mc.getNetworkHandler().sendPacket(
                         new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, pendingHit, 0));
                 mc.player.swingHand(Hand.MAIN_HAND);
                 stage = 3;
                 tickDelay = 1;
             }
-
-            // Stage 3 — restore slot + rotation, disable
             case 3 -> {
                 if (swapBack.getValue()) {
                     mc.getNetworkHandler().sendPacket(
                             new UpdateSelectedSlotC2SPacket(oldSlot));
                     mc.player.getInventory().setSelectedSlot(oldSlot);
                 }
-                // Rotation restore — ek aur packet
-                injectYaw   = savedYaw;
-                injectPitch = savedPitch;
                 shouldInject = false;
-                // Macro: kaam khatam — off ho jao
                 disable();
             }
         }
     }
 
-    // ── HELPERS ────────────────────────────────────────────────────────────
-
     private PlayerEntity getTarget() {
-        // Pehle crosshair target
-        if (mc.crosshairTarget != null
-                && mc.crosshairTarget instanceof net.minecraft.util.hit.EntityHitResult ehr
+        if (mc.crosshairTarget instanceof EntityHitResult ehr
                 && ehr.getEntity() instanceof PlayerEntity p
                 && p != mc.player && !p.isDead() && !p.isSpectator()) {
             return p;
         }
-        // Fallback: nearest player
         PlayerEntity closest = null;
         double minDist = 5.0;
         for (PlayerEntity player : mc.world.getPlayers()) {
@@ -267,4 +229,4 @@ public final class AutoWeb extends Module implements TickListener, PacketSendLis
         resetState();
         if (isEnabled()) toggle();
     }
-            }
+             }
