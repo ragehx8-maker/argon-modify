@@ -57,8 +57,3 @@ public final class TimingProfile {
         return Math.max(lo, Math.min(hi, lo + (hi - lo) * 0.4));
     }
 }
-```[cite: 1]
-
-5. Sabse neeche jaakar **"Commit changes..."** par click kar de. 
-
-Bas itna hi karna hai! Isse `combat` folder bhi ban jayega aur file bhi uske andar save ho jayegi. Ise karke bata phir aage chalte hain!
