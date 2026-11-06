@@ -1,87 +1,42 @@
-package dev.lvstrng.argon.utils;
+package dev.lvstrng.argon.util;
 
-import dev.lvstrng.argon.utils.rotation.Rotation;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.projectile.ProjectileUtil;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.*;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 
-import static dev.lvstrng.argon.Argon.mc;
+public class RotationUtils {
 
-public final class RotationUtils {
+   // Target position par dekhne ke liye Yaw aur Pitch nikalne ka formula
+   public static float[] getRotations(Vec3d targetPos) {
+      MinecraftClient mc = MinecraftClient.getInstance();
+      if (mc.player == null) return new float[]{mc.player.getYaw(), mc.player.getPitch()};
 
-	public static Vec3d getEyesPos(PlayerEntity player) {
-		return player.getCameraPosVec(RenderUtils.tickProgress());
-	}
+      Vec3d eyesPos = mc.player.getEyePos();
+      double diffX = targetPos.x - eyesPos.x;
+      double diffY = targetPos.y - eyesPos.y;
+      double diffZ = targetPos.z - eyesPos.z;
 
-	public static BlockPos getCameraBlockPos() {
-		return mc.gameRenderer.getCamera().getBlockPos();
-	}
+      double diffXZ = Math.sqrt(diffX * diffX + diffZ * diffZ);
 
-	public static BlockPos getEyesBlockPos() {
-		return new BlockPos((int) getEyesPos(mc.player).x, (int) getEyesPos(mc.player).y, (int) getEyesPos(mc.player).z);
-	}
+      float yaw = (float) (Math.atan2(diffZ, diffX) * (180.0 / Math.PI)) - 90.0F;
+      float pitch = (float) -(Math.atan2(diffY, diffXZ) * (180.0 / Math.PI));
 
-	public static Vec3d getPlayerLookVec(float yaw, float pitch) {
-		float f = pitch * 0.017453292F;
-		float g = -yaw * 0.017453292F;
+      // Smooth angle wrapping
+      yaw = mc.player.getYaw() + MathHelper.wrapDegrees(yaw - mc.player.getYaw());
+      pitch = MathHelper.clamp(pitch, -90.0F, 90.0F);
 
-		float h = MathHelper.cos(g);
-		float i = MathHelper.sin(g);
-		float j = MathHelper.cos(f);
-		float k = MathHelper.sin(f);
+      return new float[]{yaw, pitch};
+   }
 
-		return new Vec3d((i * j), (-k), (h * j));
-	}
-
-	public static Vec3d getPlayerLookVec(PlayerEntity player) {
-		return getPlayerLookVec(player.getYaw(), player.getPitch());
-	}
-
-	public static Rotation getDiff(Rotation rotation1, Rotation rotation2) {
-		double yaw = Math.abs(Math.max(rotation1.yaw(), rotation2.yaw()) - Math.min(rotation1.yaw(), rotation2.yaw()));
-		double pitch = Math.abs(Math.max(rotation1.pitch(), rotation2.pitch()) - Math.min(rotation1.pitch(), rotation2.pitch()));
-
-		return new Rotation(yaw, pitch);
-	}
-
-	public static Rotation getSmoothRotation(Rotation from, Rotation to, double speed) {
-		return new Rotation(
-				MathHelper.lerpAngleDegrees((float) speed, (float) from.yaw(), (float) to.yaw()),
-				MathHelper.lerpAngleDegrees((float) speed, (float) from.pitch(), (float) to.pitch())
-		);
-	}
-
-	public static double getTotalDiff(Rotation rotation1, Rotation rotation2) {
-		Rotation diff = getDiff(rotation1, rotation2);
-
-		return diff.yaw() + diff.pitch();
-	}
-
-	public static Vec3d getClientLookVec() {
-		return getPlayerLookVec(mc.player);
-	}
-
-	public static Rotation getDirection(Entity entity, Vec3d vec) {
-		double dx = vec.x - entity.getX(),
-				dy = vec.y - entity.getY(),
-				dz = vec.z - entity.getZ(),
-				dist = MathHelper.sqrt((float) (dx * dx + dz * dz));
-
-		return new Rotation(MathHelper.wrapDegrees(Math.toDegrees(Math.atan2(dz, dx)) - 90.0), -MathHelper.wrapDegrees(Math.toDegrees(Math.atan2(dy, dist))));
-	}
-
-	public static double getAngleToRotation(Rotation rotation) {
-		double currentYaw = MathHelper.wrapDegrees(mc.player.getYaw());
-		double currentPitch = MathHelper.wrapDegrees(mc.player.getPitch());
-
-		double diffYaw = MathHelper.wrapDegrees(currentYaw - rotation.yaw());
-		double diffPitch = MathHelper.wrapDegrees(currentPitch - rotation.pitch());
-
-		return Math.sqrt(diffYaw * diffYaw + diffPitch * diffPitch);
-	}
+   // Minecraft sensitivity GCD fix (Anti-cheat flag bachane ke liye)
+   public static float applyGCD(float current, float previous) {
+      MinecraftClient mc = MinecraftClient.getInstance();
+      if (mc.options == null) return current;
+      
+      float sensitivity = (float) mc.options.getMouseSensitivity().getValue();
+      float f = sensitivity * 0.6F + 0.2F;
+      float gcd = f * f * f * 1.2F;
+      
+      return current - (current - previous) % gcd;
+   }
 }
