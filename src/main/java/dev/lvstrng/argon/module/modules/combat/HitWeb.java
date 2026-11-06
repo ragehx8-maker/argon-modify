@@ -19,7 +19,8 @@ public class HitWeb extends Module {
     public static double chance = 100.0; 
 
     public HitWeb() {
-        super("HitWeb", Category.COMBAT, "Places cobweb under target");
+        // Aapke client ke base Module constructor ke mutabiq arguments order
+        super("HitWeb", Category.COMBAT);
     }
 
     public static void onTick() {
@@ -27,16 +28,11 @@ public class HitWeb extends Module {
 
         PlayerEntity target = getNearestTarget();
         if (target != null) {
-            // Chance check
             if (!checkChance()) return;
 
-            // Mapping error fix karne ke liye getX(), getY(), getZ() use kiya hai
             Vec3d targetFeetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
 
-            // 1. Silent Rotation activate karna
             CustomRotator.faceTarget(targetFeetPos);
-
-            // 2. Hotbar se Cobweb nikal kar place karna aur sword wapis lana
             placeCobwebAndSwitchBack(targetFeetPos);
         } else {
             CustomRotator.reset();
@@ -44,7 +40,6 @@ public class HitWeb extends Module {
         }
     }
 
-    // Random chance validator
     private static boolean checkChance() {
         if (chance >= 100.0) return true;
         if (chance <= 0.0) return false;
@@ -58,7 +53,7 @@ public class HitWeb extends Module {
         for (PlayerEntity player : mc.world.getPlayers()) {
             if (player == mc.player || player.isDead()) continue;
             double dist = mc.player.squaredDistanceTo(player);
-            if (dist < minDistance && dist <= 16.0) { // Range 4 blocks (4^2 = 16)
+            if (dist < minDistance && dist <= 16.0) {
                 minDistance = dist;
                 closest = player;
             }
@@ -69,22 +64,18 @@ public class HitWeb extends Module {
     private static void placeCobwebAndSwitchBack(Vec3d pos) {
         if (mc.player == null) return;
 
-        // Hotbar mein Cobweb dhoondhna
         int webSlot = findCobwebSlot();
-        if (webSlot == -1) return; // Agar cobweb nahi hai toh kuch mat karo
+        if (webSlot == -1) return;
 
-        // Agar pehle se slot save nahi hai, toh current slot save kar lo
         if (previousSlot == -1) {
             previousSlot = mc.player.getInventory().selectedSlot;
         }
 
-        // Cobweb wale slot par switch karo
+        // Inventory slot set karne ke liye standard method ya assignment
         mc.player.getInventory().selectedSlot = webSlot;
 
-        // Feet ke niche block place karne ki position
         BlockPos blockPos = new BlockPos((int)pos.x, (int)pos.y, (int)pos.z);
 
-        // Kaam hote hi turant wapis purane slot par switch ho jao
         if (previousSlot != -1) {
             mc.player.getInventory().selectedSlot = previousSlot;
             previousSlot = -1;
