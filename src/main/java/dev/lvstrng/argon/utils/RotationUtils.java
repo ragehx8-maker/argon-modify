@@ -1,42 +1,52 @@
-package dev.lvstrng.argon.utils;
+package dev.lvstrng.argon.utils.rotation;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.entity.Entity;
 import net.minecraft.util.math.Vec3d;
 
 public class RotationUtils {
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-   // Target position par dekhne ke liye Yaw aur Pitch nikalne ka formula
-   public static float[] getRotations(Vec3d targetPos) {
-      MinecraftClient mc = MinecraftClient.getInstance();
-      if (mc.player == null) return new float[]{mc.player.getYaw(), mc.player.getPitch()};
+    // Line 36 sensitivity casting error fix
+    public static float getSensitivity() {
+        if (mc.options == null || mc.options.getMouseSensitivity() == null) return 0.5f;
+        return (float) (double) mc.options.getMouseSensitivity().getValue();
+    }
 
-      Vec3d eyesPos = mc.player.getEyePos();
-      double diffX = targetPos.x - eyesPos.x;
-      double diffY = targetPos.y - eyesPos.y;
-      double diffZ = targetPos.z - eyesPos.z;
+    public static Vec3d getEyesPos(Entity entity) {
+        if (entity == null) return Vec3d.ZERO;
+        return new Vec3d(entity.getX(), entity.getY() + entity.getEyeHeight(entity.getPose()), entity.getZ());
+    }
 
-      double diffXZ = Math.sqrt(diffX * diffX + diffZ * diffZ);
+    public static Rotation getDirection(Entity from, Vec3d to) {
+        if (from == null || to == null) return new Rotation(0.0f, 0.0f);
+        Vec3d eyes = getEyesPos(from);
+        double diffX = to.x - eyes.x;
+        double diffY = to.y - eyes.y;
+        double diffZ = to.z - eyes.z;
+        double diffXZ = Math.sqrt(diffX * diffX + diffZ * diffZ);
+        float yaw = (float) Math.toDegrees(Math.atan2(diffZ, diffX)) - 90.0F;
+        float pitch = (float) -Math.toDegrees(Math.atan2(diffY, diffXZ));
+        return new Rotation(yaw, pitch);
+    }
 
-      float yaw = (float) (Math.atan2(diffZ, diffX) * (180.0 / Math.PI)) - 90.0F;
-      float pitch = (float) -(Math.atan2(diffY, diffXZ) * (180.0 / Math.PI));
+    public static double getTotalDiff(Rotation rot1, Rotation rot2) {
+        if (rot1 == null || rot2 == null) return 0.0;
+        float yawDiff = Math.abs(rot1.getYaw() - rot2.getYaw());
+        float pitchDiff = Math.abs(rot1.getPitch() - rot2.getPitch());
+        return yawDiff + pitchDiff;
+    }
 
-      // Smooth angle wrapping
-      yaw = mc.player.getYaw() + MathHelper.wrapDegrees(yaw - mc.player.getYaw());
-      pitch = MathHelper.clamp(pitch, -90.0F, 90.0F);
+    public static Rotation getSmoothRotation(Rotation current, Rotation target, double speed) {
+        if (current == null || target == null) return target;
+        float yaw = current.getYaw() + (target.getYaw() - current.getYaw()) * (float) speed;
+        float pitch = current.getPitch() + (target.getPitch() - current.getPitch()) * (float) speed;
+        return new Rotation(yaw, pitch);
+    }
 
-      return new float[]{yaw, pitch};
-   }
-
-   // Minecraft sensitivity GCD fix (Anti-cheat flag bachane ke liye)
-   public static float applyGCD(float current, float previous) {
-      MinecraftClient mc = MinecraftClient.getInstance();
-      if (mc.options == null) return current;
-      
-      float sensitivity = (float) mc.options.getMouseSensitivity().getValue();
-      float f = sensitivity * 0.6F + 0.2F;
-      float gcd = f * f * f * 1.2F;
-      
-      return current - (current - previous) % gcd;
-   }
+    public static double getAngleToRotation(Rotation rotation) {
+        if (rotation == null || mc.player == null) return 0.0;
+        Rotation currentRot = new Rotation(mc.player.getYaw(), mc.player.getPitch());
+        return getTotalDiff(currentRot, rotation);
+    }
 }
