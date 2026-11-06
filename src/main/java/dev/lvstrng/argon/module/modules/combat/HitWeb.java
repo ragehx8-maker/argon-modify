@@ -9,18 +9,21 @@ import net.minecraft.item.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.Hand;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class HitWeb extends Module {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static int previousSlot = -1;
     
-    // Chance percentage (1.0 se 100.0 tak)
     public static double chance = 100.0; 
 
     public HitWeb() {
-        // Aapke client ke base Module constructor ke mutabiq arguments order
-        super("HitWeb", Category.COMBAT);
+        // Base Module constructor ke mutabiq 4 arguments (Name, Description, Key/Bind, Category)
+        super("HitWeb", "Places cobweb under target", 0, Category.COMBAT);
     }
 
     public static void onTick() {
@@ -62,7 +65,7 @@ public class HitWeb extends Module {
     }
 
     private static void placeCobwebAndSwitchBack(Vec3d pos) {
-        if (mc.player == null) return;
+        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
 
         int webSlot = findCobwebSlot();
         if (webSlot == -1) return;
@@ -71,12 +74,24 @@ public class HitWeb extends Module {
             previousSlot = mc.player.getInventory().selectedSlot;
         }
 
-        // Inventory slot set karne ke liye standard method ya assignment
+        // Private access error fix karne ke liye packet aur inventory slot set karna
+        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(webSlot));
         mc.player.getInventory().selectedSlot = webSlot;
 
-        BlockPos blockPos = new BlockPos((int)pos.x, (int)pos.y, (int)pos.z);
+        BlockPos blockPos = new BlockPos((int)Math.floor(pos.x), (int)Math.floor(pos.y), (int)Math.floor(pos.z));
+        
+        BlockHitResult hitResult = new BlockHitResult(
+            new Vec3d(blockPos.getX() + 0.5, blockPos.getY(), blockPos.getZ() + 0.5), 
+            Direction.UP, 
+            blockPos, 
+            false
+        );
+
+        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+        mc.player.swingHand(Hand.MAIN_HAND);
 
         if (previousSlot != -1) {
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(previousSlot));
             mc.player.getInventory().selectedSlot = previousSlot;
             previousSlot = -1;
         }
@@ -95,7 +110,8 @@ public class HitWeb extends Module {
     }
 
     private static void resetSlot() {
-        if (previousSlot != -1 && mc.player != null) {
+        if (previousSlot != -1 && mc.player != null && mc.getNetworkHandler() != null) {
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(previousSlot));
             mc.player.getInventory().selectedSlot = previousSlot;
             previousSlot = -1;
         }
