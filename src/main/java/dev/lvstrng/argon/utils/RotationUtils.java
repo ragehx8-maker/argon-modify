@@ -1,4 +1,4 @@
-package dev.lvstrng.argon.util;
+package dev.lvstrng.argon.utils;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.MathHelper;
